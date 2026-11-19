@@ -112,4 +112,4 @@ Open the live GitHub Pages link for this repository (`https://<your-username>.gi
    ```bash
    python3 -m http.server 8000
 
-[[./preview.jpg]]
+[./preview.jpg]
