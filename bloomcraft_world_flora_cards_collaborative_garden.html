@@ -1,0 +1,1527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>BloomCraft: World Flora Cards &amp; Collaborative Garden</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    * { box-sizing: border-box; user-select: none; -webkit-user-select: none; }
+    html, body {
+      margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: #87ceeb;
+      touch-action: none;
+    }
+    #game-container { position: relative; width: 100%; height: 100%; }
+    canvas { display: block; width: 100%; height: 100%; outline: none; }
+
+    #crosshair {
+      position: fixed; top: 50%; left: 50%;
+      width: 20px; height: 20px;
+      transform: translate(-50%, -50%);
+      pointer-events: none; z-index: 20;
+      display: none;
+    }
+    #crosshair.visible { display: block; }
+    #crosshair::before, #crosshair::after {
+      content: ''; position: absolute; background: rgba(255,255,255,0.92);
+      box-shadow: 0 0 3px rgba(0,0,0,0.7);
+    }
+    #crosshair::before { left: 9px; top: 2px; width: 2px; height: 16px; }
+    #crosshair::after { top: 9px; left: 2px; height: 2px; width: 16px; }
+
+    .hotbar-slot {
+      transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+    }
+    .hotbar-slot.active {
+      transform: translateY(-4px) scale(1.07);
+      border-color: #fde047;
+      background: rgba(255, 255, 255, 0.28);
+      box-shadow: 0 0 14px rgba(253, 224, 71, 0.55);
+    }
+
+    .poke-card {
+      transition: transform 0.16s ease, box-shadow 0.16s ease;
+    }
+    .poke-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 10px 24px rgba(0,0,0,0.45);
+    }
+
+    #toast { transition: opacity 0.25s ease, transform 0.25s ease; }
+    #toast.hidden-toast { opacity: 0; transform: translate(-50%, 10px); pointer-events: none; }
+
+    .nice-scroll::-webkit-scrollbar { width: 6px; }
+    .nice-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.25); border-radius: 999px; }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="game-canvas" tabindex="0"></canvas>
+    <div id="crosshair"></div>
+
+    <!-- Top HUD -->
+    <div class="fixed top-3 left-3 right-3 z-30 flex flex-wrap items-start justify-between gap-2 pointer-events-none">
+      <!-- Brand + Player ID + Survival Bars -->
+      <div class="pointer-events-auto flex items-center gap-3 bg-slate-900/85 backdrop-blur-md text-white px-3.5 py-2 rounded-2xl border border-white/15 shadow-lg">
+        <button id="btn-profile-badge" class="w-9 h-9 rounded-xl bg-gradient-to-br from-fuchsia-500 via-purple-500 to-amber-400 flex items-center justify-center text-xl shadow-inner hover:scale-105 transition" title="Open Player ID &amp; Group Hub">
+          <span id="hud-avatar">🧭</span>
+        </button>
+        <div>
+          <div class="text-sm font-bold leading-tight tracking-tight flex items-center gap-2">
+            <span id="hud-player-id" class="text-amber-300">Explorer#1001</span>
+            <button id="btn-mode" class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/25 hover:bg-emerald-500/40 text-emerald-300 border border-emerald-400/30 transition" title="Switch Survival / Creative">
+              Survival
+            </button>
+            <span id="fly-badge" class="hidden text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-sky-500/30 text-sky-200 border border-sky-400/40">🕊️ Fly</span>
+          </div>
+          <div id="survival-bars" class="flex items-center gap-2.5 text-[11px] mt-0.5">
+            <span title="Health">❤️ <strong id="stat-hp" class="text-rose-300">20</strong></span>
+            <span title="Hunger">🍗 <strong id="stat-hunger" class="text-amber-300">20</strong></span>
+            <span title="Collected Plant Cards">🃏 <strong id="stat-cards" class="text-fuchsia-300">0</strong>/16</span>
+            <span>✨ <strong id="stat-score" class="text-yellow-300">0</strong></span>
+            <span id="stat-time" class="text-sky-300">☀️ Day</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="pointer-events-auto flex flex-wrap items-center gap-1.5">
+        <button id="btn-cards" class="bg-fuchsia-500 hover:bg-fuchsia-400 text-white text-xs font-extrabold px-3 py-2 rounded-xl border border-fuchsia-300/40 shadow-lg transition flex items-center gap-1" title="Plant Cards &amp; Trading (K)">
+          <span>🃏</span><span>Cards</span><span class="hidden sm:inline opacity-80 text-[10px]">(K)</span>
+        </button>
+        <button id="btn-group" class="bg-sky-400 hover:bg-sky-300 text-slate-950 text-xs font-extrabold px-3 py-2 rounded-xl border border-sky-200 shadow-lg transition flex items-center gap-1" title="Gaming ID &amp; Group Co-op (G)">
+          <span>👥</span><span>Group</span><span class="hidden sm:inline opacity-70 text-[10px]">(G)</span>
+        </button>
+        <button id="btn-map" class="bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-extrabold px-3 py-2 rounded-xl border border-amber-200 shadow-lg transition flex items-center gap-1" title="Open The Map (M)">
+          <span>🗺️</span><span>Map</span><span class="hidden sm:inline opacity-70 text-[10px]">(M)</span>
+        </button>
+        <button id="btn-inventory" class="bg-purple-500 hover:bg-purple-400 text-white text-xs font-extrabold px-2.5 py-2 rounded-xl border border-purple-300/40 shadow-lg transition flex items-center gap-1" title="Backpack (I)">
+          <span>🎒</span><span class="hidden md:inline">Bag</span>
+        </button>
+        <button id="btn-craft" class="bg-orange-400 hover:bg-orange-300 text-slate-950 text-xs font-extrabold px-2.5 py-2 rounded-xl border border-orange-200 shadow-lg transition flex items-center gap-1" title="Crafting &amp; Smelting (C)">
+          <span>⚒️</span><span class="hidden md:inline">Craft</span>
+        </button>
+        <button id="btn-fly" class="bg-slate-900/80 hover:bg-slate-800/90 backdrop-blur-md text-white text-xs font-semibold px-2.5 py-2 rounded-xl border border-white/15 shadow transition" title="Toggle Fly (F)">🕊️</button>
+        <button id="btn-weather" class="bg-slate-900/80 hover:bg-slate-800/90 backdrop-blur-md text-white text-xs font-semibold px-2.5 py-2 rounded-xl border border-white/15 shadow transition" title="Toggle Rain"><span id="weather-icon">🌤️</span></button>
+        <button id="btn-time" class="bg-slate-900/80 hover:bg-slate-800/90 backdrop-blur-md text-white text-xs font-semibold px-2.5 py-2 rounded-xl border border-white/15 shadow transition" title="Cycle Time">🕒</button>
+        <button id="btn-pad-toggle" class="bg-slate-900/80 hover:bg-slate-800/90 backdrop-blur-md text-white text-xs font-semibold px-2.5 py-2 rounded-xl border border-white/15 shadow transition" title="Toggle On-Screen Move Pad">🕹️</button>
+        <button id="btn-sound" class="bg-slate-900/80 hover:bg-slate-800/90 backdrop-blur-md text-white text-xs font-semibold px-2.5 py-2 rounded-xl border border-white/15 shadow transition" title="Toggle Sound">🔊</button>
+      </div>
+    </div>
+
+    <!-- Swiper Alert Banner -->
+    <div id="swiper-banner" class="fixed top-16 left-1/2 -translate-x-1/2 z-40 hidden">
+      <button id="btn-stop-swiper" class="bg-gradient-to-r from-orange-500 to-rose-500 hover:from-orange-400 hover:to-rose-400 text-white text-xs font-extrabold px-4 py-2 rounded-full border-2 border-yellow-300 shadow-2xl animate-bounce flex items-center gap-2">
+        <span>🦊</span>
+        <span>Swiper Alert! Click here or press V: "Swiper, No Swiping!"</span>
+      </button>
+    </div>
+
+    <!-- Target Inspector Pill -->
+    <div id="target-pill" class="fixed top-24 left-1/2 -translate-x-1/2 z-20 pointer-events-none hidden">
+      <div class="bg-slate-900/85 backdrop-blur-md text-white text-xs px-3 py-1.5 rounded-full border border-white/15 shadow flex items-center gap-2">
+        <span id="target-icon">🌱</span>
+        <span id="target-name" class="font-semibold">Grass Block</span>
+        <span id="target-extra" class="text-emerald-300 text-[11px]"></span>
+      </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="hidden-toast fixed bottom-28 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 backdrop-blur-md text-white text-xs font-medium px-4 py-2 rounded-full border border-white/20 shadow-xl text-center max-w-[90vw]">
+      Saved!
+    </div>
+
+    <!-- On-Screen Move & Action Pad -->
+    <div id="touch-controls" class="fixed bottom-24 left-3 right-3 z-20 flex items-end justify-between pointer-events-none md:hidden">
+      <div class="pointer-events-auto grid grid-cols-3 gap-1.5 w-32 h-32 opacity-90">
+        <button id="pad-turn-left" class="bg-slate-900/75 active:bg-sky-500 text-white rounded-xl border border-white/20 flex items-center justify-center text-xs font-bold">↺</button>
+        <button data-move="forward" class="touch-move bg-slate-900/75 active:bg-emerald-600 text-white rounded-xl border border-white/20 flex items-center justify-center text-lg font-bold">▲</button>
+        <button id="pad-turn-right" class="bg-slate-900/75 active:bg-sky-500 text-white rounded-xl border border-white/20 flex items-center justify-center text-xs font-bold">↻</button>
+        <button data-move="left" class="touch-move bg-slate-900/75 active:bg-emerald-600 text-white rounded-xl border border-white/20 flex items-center justify-center text-lg font-bold">◀</button>
+        <button data-move="jump" class="touch-move bg-slate-900/75 active:bg-amber-500 text-white rounded-xl border border-white/20 flex items-center justify-center text-xs font-bold">JMP</button>
+        <button data-move="right" class="touch-move bg-slate-900/75 active:bg-emerald-600 text-white rounded-xl border border-white/20 flex items-center justify-center text-lg font-bold">▶</button>
+        <div></div>
+        <button data-move="backward" class="touch-move bg-slate-900/75 active:bg-emerald-600 text-white rounded-xl border border-white/20 flex items-center justify-center text-lg font-bold">▼</button>
+        <div></div>
+      </div>
+
+      <div class="pointer-events-auto flex flex-col gap-2">
+        <button id="touch-use" class="bg-emerald-500/95 active:bg-emerald-400 text-slate-950 font-bold text-xs px-4 py-3 rounded-2xl border border-white/30 shadow-lg">🌱 Use / Place</button>
+        <button id="touch-break" class="bg-rose-500/95 active:bg-rose-400 text-white font-bold text-xs px-4 py-3 rounded-2xl border border-white/30 shadow-lg">⛏️ Mine / Attack</button>
+      </div>
+    </div>
+
+    <!-- Bottom Hotbar -->
+    <div class="fixed bottom-3 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-1.5 max-w-[96vw]">
+      <div class="flex flex-wrap items-center justify-center gap-1.5 bg-slate-900/85 backdrop-blur-md px-3 py-1 rounded-full border border-white/15 text-[11px] font-semibold text-white shadow">
+        <span id="selected-item-label" class="text-amber-300 px-1">Empty Hand</span>
+        <span class="text-slate-500">|</span>
+        <button id="btn-click-mode" class="px-2 py-0.5 rounded-full bg-emerald-500 text-slate-950 font-bold transition">Click: 🌱 Use / Plant</button>
+        <span class="hidden sm:inline text-slate-400 text-[10px]">K = Cards • G = Group • M = Map • I = Bag • C = Craft</span>
+      </div>
+      <div id="hotbar" class="flex items-center gap-1.5 bg-slate-900/85 backdrop-blur-md p-1.5 rounded-2xl border border-white/20 shadow-2xl overflow-x-auto max-w-full"></div>
+    </div>
+
+    <!-- Welcome / Gaming ID Onboarding Modal -->
+    <div id="welcome-modal" class="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-sm flex items-center justify-center p-4">
+      <div class="bg-slate-900 text-white max-w-lg w-full rounded-3xl border border-white/20 shadow-2xl p-6 text-center">
+        <div class="w-16 h-16 mx-auto mb-3 rounded-2xl bg-gradient-to-br from-fuchsia-500 via-purple-500 to-amber-400 flex items-center justify-center text-3xl shadow-lg">
+          🃏🌍
+        </div>
+        <h1 class="text-2xl font-extrabold tracking-tight">BloomCraft: World Flora &amp; Cards</h1>
+        <p class="text-xs text-slate-300 mt-1.5 leading-relaxed">
+          Explore a 3D Minecraft-style botanical world! Learn about real plants across every continent, collect Pokémon-style Plant Cards, trade with friends, and collaborate in Groups.
+        </p>
+
+        <div class="mt-4 bg-slate-800/85 rounded-2xl p-3.5 text-left border border-white/10 space-y-2.5">
+          <div class="text-xs font-bold text-amber-300">🆔 Create Your Explorer Gaming ID</div>
+          <div class="flex gap-2">
+            <select id="welcome-avatar" class="bg-slate-900 border border-white/15 rounded-xl px-2.5 py-2 text-lg">
+              <option value="🧭">🧭</option>
+              <option value="🌸">🌸</option>
+              <option value="🦊">🦊</option>
+              <option value="🐒">🐒</option>
+              <option value="🌵">🌵</option>
+              <option value="🦋">🦋</option>
+            </select>
+            <input id="welcome-name" type="text" maxlength="16" placeholder="Your Explorer Name (e.g. Maya)" class="flex-1 bg-slate-900 border border-white/15 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400" />
+          </div>
+          <div class="text-[11px] text-slate-400 flex justify-between pt-1">
+            <span>Controls: <strong class="text-slate-200">WASD + Space + Drag</strong></span>
+            <span>Keys: <strong class="text-emerald-300">K</strong> Cards • <strong class="text-sky-300">G</strong> Group</span>
+          </div>
+        </div>
+
+        <button id="btn-start-game" class="mt-4 w-full py-3 rounded-2xl bg-gradient-to-r from-fuchsia-500 via-purple-500 to-amber-400 hover:brightness-110 text-white font-extrabold text-sm shadow-lg transition transform active:scale-95">
+          🌍 ¡Vámonos! Enter World
+        </button>
+      </div>
+    </div>
+
+    <!-- Pokémon-Style Plant Card Collection & Trading Modal (K) -->
+    <div id="cards-modal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4">
+      <div class="bg-slate-900 text-white max-w-4xl w-full rounded-3xl border-2 border-fuchsia-400/50 shadow-2xl p-5 max-h-[90vh] flex flex-col">
+        <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-white/10">
+          <div class="flex items-center gap-2.5">
+            <h2 class="text-lg font-extrabold text-fuchsia-300">🃏 World Flora Card Binder</h2>
+            <div class="flex gap-1 bg-slate-800 p-1 rounded-xl text-xs">
+              <button id="cards-tab-binder" class="px-2.5 py-1 rounded-lg bg-fuchsia-500 text-white font-bold">My Cards</button>
+              <button id="cards-tab-trade" class="px-2.5 py-1 rounded-lg text-slate-300 hover:text-white font-semibold">🤝 Exchange / Trade</button>
+            </div>
+          </div>
+          <button id="close-cards" class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm">✕</button>
+        </div>
+
+        <div id="cards-binder-view" class="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 overflow-y-auto nice-scroll pr-1">
+          <!-- Populated by JS -->
+        </div>
+
+        <div id="cards-trade-view" class="mt-4 hidden overflow-y-auto nice-scroll pr-1 space-y-4">
+          <!-- P2P Code Exchange -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div class="bg-slate-800/80 p-3.5 rounded-2xl border border-white/10 space-y-2">
+              <div class="text-xs font-extrabold text-amber-300">📤 Send a Card to a Friend</div>
+              <p class="text-[11px] text-slate-300">Pick a card from your binder to generate a shareable Trade Code.</p>
+              <select id="trade-offer-select" class="w-full bg-slate-900 border border-white/15 rounded-xl px-2.5 py-2 text-xs text-white"></select>
+              <button id="btn-gen-trade" class="w-full py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs transition">🎟️ Generate Trade Code</button>
+              <input id="trade-out-code" readonly class="w-full bg-slate-950 text-emerald-300 font-mono text-[10px] p-2 rounded-xl border border-white/10" placeholder="Trade code appears here..." />
+            </div>
+
+            <div class="bg-slate-800/80 p-3.5 rounded-2xl border border-white/10 space-y-2">
+              <div class="text-xs font-extrabold text-sky-300">📥 Redeem a Friend's Trade Code</div>
+              <p class="text-[11px] text-slate-300">Paste a Trade Code from a group member or collaborator to claim their card.</p>
+              <input id="trade-in-code" class="w-full bg-slate-950 text-sky-300 font-mono text-[11px] p-2.5 rounded-xl border border-white/15 focus:outline-none focus:border-sky-400" placeholder="Paste TRADE-... code here" />
+              <button id="btn-redeem-trade" class="w-full py-2 rounded-xl bg-sky-400 hover:bg-sky-300 text-slate-950 font-bold text-xs transition">🤝 Claim Traded Card</button>
+            </div>
+          </div>
+
+          <!-- Expedition NPC Trade Post -->
+          <div class="bg-slate-800/80 p-3.5 rounded-2xl border border-emerald-400/30">
+            <div class="text-xs font-extrabold text-emerald-300 mb-2">🏕️ Expedition Trade Post (Swap Duplicates for World Biome Cards!)</div>
+            <div id="npc-trades" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Gaming ID & Collaborative Group Hub Modal (G) -->
+    <div id="group-modal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm hidden items-center justify-center p-4">
+      <div class="bg-slate-900 text-white max-w-xl w-full rounded-3xl border-2 border-sky-400/50 shadow-2xl p-5 max-h-[88vh] overflow-y-auto nice-scroll">
+        <div class="flex items-center justify-between pb-3 border-b border-white/10">
+          <div>
+            <h2 class="text-lg font-extrabold text-sky-300">👥 Explorer ID &amp; Group Co-op</h2>
+            <p class="text-xs text-slate-400">Create your Gaming ID, form a Group, and merge gardens with collaborators.</p>
+          </div>
+          <button id="close-group" class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm">✕</button>
+        </div>
+
+        <div class="mt-4 space-y-4">
+          <!-- Player Profile -->
+          <div class="bg-slate-800/80 p-3.5 rounded-2xl border border-white/10 space-y-2">
+            <div class="text-xs font-bold text-amber-300">🆔 Your Individual Gaming ID</div>
+            <div class="flex flex-wrap gap-2 items-center">
+              <span id="profile-id-display" class="font-mono text-sm font-extrabold text-white bg-slate-950 px-3 py-1.5 rounded-xl border border-white/15">Explorer#1001</span>
+              <input id="profile-rename" type="text" maxlength="16" placeholder="New name..." class="flex-1 bg-slate-900 border border-white/15 rounded-xl px-3 py-1.5 text-xs text-white" />
+              <button id="btn-save-profile" class="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs">Update ID</button>
+            </div>
+          </div>
+
+          <!-- Group Room -->
+          <div class="bg-slate-800/80 p-3.5 rounded-2xl border border-white/10 space-y-2.5">
+            <div class="flex items-center justify-between">
+              <div class="text-xs font-bold text-sky-300">🏕️ Active Group: <span id="group-code-label" class="font-mono text-white">BOTANY-CLUB-1</span></div>
+              <button id="btn-new-group" class="text-[11px] px-2.5 py-1 rounded-lg bg-sky-500/20 hover:bg-sky-500/35 text-sky-300 border border-sky-400/30 font-semibold">New Group</button>
+            </div>
+            <div class="flex gap-2">
+              <input id="join-group-input" type="text" placeholder="Enter Group Code to join..." class="flex-1 bg-slate-900 border border-white/15 rounded-xl px-3 py-1.5 text-xs text-white font-mono" />
+              <button id="btn-join-group" class="px-3 py-1.5 rounded-xl bg-sky-400 hover:bg-sky-300 text-slate-950 font-bold text-xs">Join Group</button>
+            </div>
+            <div class="text-[11px] text-slate-300">Group Members in Party:</div>
+            <div id="group-members-list" class="flex flex-wrap gap-1.5"></div>
+          </div>
+
+          <!-- Collaborative Garden Merge -->
+          <div class="bg-slate-800/80 p-3.5 rounded-2xl border border-emerald-400/30 space-y-2">
+            <div class="text-xs font-bold text-emerald-300">🌱 Collaborative Group Garden Sync</div>
+            <p class="text-[11px] text-slate-300 leading-relaxed">
+              Share your Garden Snapshot below so teammates in your Group can merge your planted flowers &amp; discoveries into their meadow!
+            </p>
+            <textarea id="garden-code" rows="3" class="w-full bg-slate-950 text-emerald-300 font-mono text-[10px] p-2.5 rounded-xl border border-white/15 focus:outline-none" placeholder="Group garden snapshot..."></textarea>
+            <div class="grid grid-cols-3 gap-2">
+              <button id="btn-copy-code" class="py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs">📋 Copy</button>
+              <button id="btn-merge-code" class="py-2 rounded-xl bg-sky-400 hover:bg-sky-300 text-slate-950 font-bold text-xs">🤝 Merge</button>
+              <button id="btn-import-code" class="py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs">📥 Replace</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- The Map Modal (M) -->
+    <div id="map-modal" class="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-sm hidden items-center justify-center p-4">
+      <div class="bg-amber-50 text-slate-900 max-w-lg w-full rounded-3xl border-4 border-amber-400 shadow-2xl p-5">
+        <div class="flex items-center justify-between pb-3 border-b border-amber-300">
+          <div>
+            <h2 class="text-lg font-extrabold flex items-center gap-2">🗺️ I'm the Map!</h2>
+            <p class="text-xs text-slate-600">Complete all 3 stops on your botanical expedition!</p>
+          </div>
+          <button id="close-map" class="w-8 h-8 rounded-full bg-amber-200 hover:bg-amber-300 flex items-center justify-center text-sm font-bold">✕</button>
+        </div>
+        <div class="mt-3 flex flex-col sm:flex-row gap-4 items-center">
+          <canvas id="minimap-canvas" width="168" height="168" class="rounded-2xl border-2 border-amber-400 shadow-inner bg-sky-200 shrink-0"></canvas>
+          <div id="quest-stops" class="flex-1 space-y-2 w-full"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Purple Backpack Modal (I) -->
+    <div id="inventory-modal" class="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-sm hidden items-center justify-center p-4">
+      <div class="bg-slate-900 text-white max-w-2xl w-full rounded-3xl border-2 border-purple-400/60 shadow-2xl p-5 max-h-[88vh] flex flex-col">
+        <div class="flex items-center justify-between pb-3 border-b border-purple-400/20">
+          <div>
+            <h2 class="text-lg font-extrabold flex items-center gap-2 text-purple-300">🎒 Backpack, Backpack!</h2>
+            <p class="text-xs text-slate-400">Click any item to equip it into your active hotbar slot (<span id="inv-active-slot" class="text-amber-300 font-bold">Slot 1</span>).</p>
+          </div>
+          <button id="close-inventory" class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm">✕</button>
+        </div>
+        <div id="inventory-grid" class="mt-4 space-y-4 overflow-y-auto nice-scroll pr-1"></div>
+      </div>
+    </div>
+
+    <!-- Crafting Table & Furnace Modal (C) -->
+    <div id="craft-modal" class="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-sm hidden items-center justify-center p-4">
+      <div class="bg-slate-900 text-white max-w-2xl w-full rounded-3xl border border-white/20 shadow-2xl p-5 max-h-[88vh] flex flex-col">
+        <div class="flex items-center justify-between pb-3 border-b border-white/10">
+          <div class="flex items-center gap-2">
+            <h2 class="text-lg font-extrabold">⚒️ Crafting &amp; Smelting</h2>
+            <div class="flex gap-1 bg-slate-800 p-1 rounded-xl text-xs">
+              <button id="craft-tab-table" class="px-2.5 py-1 rounded-lg bg-amber-400 text-slate-950 font-bold">Crafting Table</button>
+              <button id="craft-tab-furnace" class="px-2.5 py-1 rounded-lg text-slate-300 hover:text-white font-semibold">🔥 Furnace</button>
+            </div>
+          </div>
+          <button id="close-craft" class="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm">✕</button>
+        </div>
+        <div id="craft-list" class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2.5 overflow-y-auto nice-scroll pr-1"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (() => {
+    // =========================================================
+    // 1. WEB AUDIO SYNTHESIZER
+    // =========================================================
+    const SFX = {
+      ctx: null, muted: false,
+      init() {
+        if (!this.ctx) { const AC = window.AudioContext || window.webkitAudioContext; if (AC) this.ctx = new AC(); }
+        if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+      },
+      tone(freq, type = 'sine', dur = 0.12, vol = 0.12, slideTo = null) {
+        if (this.muted) return; this.init(); if (!this.ctx) return;
+        const now = this.ctx.currentTime, osc = this.ctx.createOscillator(), gain = this.ctx.createGain();
+        osc.type = type; osc.frequency.setValueAtTime(freq, now);
+        if (slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, now + dur);
+        gain.gain.setValueAtTime(vol, now); gain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+        osc.connect(gain); gain.connect(this.ctx.destination); osc.start(now); osc.stop(now + dur);
+      },
+      plant() { this.tone(340, 'triangle', 0.1, 0.14, 520); },
+      till() { this.tone(240, 'sawtooth', 0.07, 0.08, 160); },
+      water() { this.tone(540, 'sine', 0.09, 0.1, 820); },
+      bloom() { [523, 659, 784, 1046].forEach((f, i) => setTimeout(() => this.tone(f, 'triangle', 0.16, 0.09), i * 50)); },
+      loHicimos() { [523, 659, 784, 1046, 1318].forEach((f, i) => setTimeout(() => this.tone(f, 'triangle', 0.2, 0.12), i * 80)); },
+      dig() { this.tone(150, 'square', 0.09, 0.09, 75); },
+      place() { this.tone(210, 'triangle', 0.08, 0.12, 140); },
+      craft() { this.tone(440, 'triangle', 0.08, 0.12, 660); setTimeout(() => this.tone(660, 'triangle', 0.12, 0.12, 880), 60); },
+      hit() { this.tone(120, 'sawtooth', 0.12, 0.14, 60); },
+      eat() { this.tone(300, 'sine', 0.08, 0.12, 420); },
+      swiper() { this.tone(280, 'sawtooth', 0.15, 0.12, 140); }
+    };
+
+    // =========================================================
+    // 2. WORLD FLORA POKÉMON-STYLE CARDS & BOTANICAL KNOWLEDGE
+    // =========================================================
+    const PLANT_CARDS = [
+      { id: 'poppy',     name: 'Red Poppy',       latin: 'Papaver rhoeas',        icon: '🌺', region: 'Europe & W. Asia', biome: 'Temperate Meadow', rarity: 'Common',    pwr: 45, hyd: 50, res: 60, fact: 'Poppy seeds can lie dormant in soil for decades and sprout as soon as the earth is disturbed.' },
+      { id: 'tulip',     name: 'Sunburst Tulip',  latin: 'Tulipa gesneriana',     icon: '🌷', region: 'Central Asia',     biome: 'Mountain Steppe',  rarity: 'Common',    pwr: 52, hyd: 55, res: 58, fact: 'Tulips continue to grow and bend toward light even after being cut and placed in a vase.' },
+      { id: 'bluebell',  name: 'Azure Bluebell',  latin: 'Hyacinthoides non-scripta', icon: '💠', region: 'Western Europe', biome: 'Ancient Woodland', rarity: 'Common',    pwr: 48, hyd: 70, res: 55, fact: 'Almost half of the world’s wild bluebells grow in ancient woodlands in the UK.' },
+      { id: 'orchid',    name: 'Violet Orchid',   latin: 'Phalaenopsis spp.',     icon: '🪻', region: 'SE Asia & Australia', biome: 'Rainforest Canopy', rarity: 'Uncommon', pwr: 68, hyd: 80, res: 62, fact: 'Orchids are one of the largest plant families on Earth, with over 28,000 wild species.' },
+      { id: 'sunflower', name: 'Sunny Sunflower', latin: 'Helianthus annuus',     icon: '🌻', region: 'North America',    biome: 'Open Prairie',     rarity: 'Uncommon',  pwr: 76, hyd: 60, res: 78, fact: 'Young sunflowers track the sun from east to west each day—a behavior called heliotropism.' },
+      { id: 'moonlily',  name: 'Moonlight Lily',  latin: 'Epiphyllum oxypetalum', icon: '🪷', region: 'Central America',  biome: 'Night Forest',     rarity: 'Rare',      pwr: 86, hyd: 75, res: 70, fact: 'Known as the "Queen of the Night," its fragrant white flowers open only after sunset and wilt by dawn.' },
+      { id: 'rose',      name: 'Crimson Rose',    latin: 'Rosa gallica',          icon: '🌹', region: 'Middle East & Europe', biome: 'Temperate Garden', rarity: 'Rare',   pwr: 82, hyd: 65, res: 75, fact: 'Fossil evidence shows wild roses have been blooming on Earth for over 35 million years.' },
+      { id: 'prism',     name: 'Prism Blossom',   latin: 'Strelitzia reginae',    icon: '🌈', region: 'South Africa',     biome: 'Coastal Subtropics', rarity: 'Legendary', pwr: 98, hyd: 85, res: 90, fact: 'Bird of Paradise flowers are pollinated by sunbirds that perch on the vivid blue petal.' },
+      // World Biome Collectible Cards (unlockable via harvesting luck or trading!)
+      { id: 'sakura',    name: 'Cherry Blossom',  latin: 'Prunus serrulata',      icon: '🌸', region: 'East Asia (Japan)', biome: 'Temperate Forest', rarity: 'Uncommon',  pwr: 72, hyd: 68, res: 64, fact: 'Sakura trees bloom for only 1–2 weeks each spring, celebrated in Japan as Hanami.' },
+      { id: 'saguaro',   name: 'Saguaro Cactus',  latin: 'Carnegiea gigantea',    icon: '🌵', region: 'Sonoran Desert',   biome: 'Arid Desert',      rarity: 'Uncommon',  pwr: 74, hyd: 95, res: 96, fact: 'A large saguaro can store up to 200 gallons of water in its pleated ribs after a desert rain.' },
+      { id: 'baobab',    name: 'Baobab Tree',     latin: 'Adansonia digitata',    icon: '🌳', region: 'African Savanna',  biome: 'Savanna',          rarity: 'Rare',      pwr: 90, hyd: 88, res: 98, fact: 'Called the "Tree of Life," baobabs can live over 2,000 years and store thousands of liters of water.' },
+      { id: 'flytrap',   name: 'Venus Flytrap',   latin: 'Dionaea muscipula',     icon: '🪴', region: 'North Carolina, USA', biome: 'Coastal Bog',   rarity: 'Rare',      pwr: 89, hyd: 82, res: 72, fact: 'It counts trigger-hair touches: two touches within 20 seconds snap the trap shut in 0.1 seconds!' },
+      { id: 'edelweiss', name: 'Alpine Edelweiss',latin: 'Leontopodium nivale',   icon: '❄️', region: 'European Alps',    biome: 'High Alpine',      rarity: 'Rare',      pwr: 80, hyd: 60, res: 95, fact: 'Its woolly white bracts protect the flower from intense high-altitude UV radiation and freezing winds.' },
+      { id: 'victoria',  name: 'Giant Water Lily',latin: 'Victoria amazonica',    icon: '🌿', region: 'Amazon Basin',     biome: 'River Wetland',    rarity: 'Legendary', pwr: 94, hyd: 99, res: 84, fact: 'Its circular floating leaves can grow up to 3 meters wide and support the weight of a small child.' },
+      { id: 'jacaranda', name: 'Blue Jacaranda',  latin: 'Jacaranda mimosifolia', icon: '🟣', region: 'South America',    biome: 'Subtropical',      rarity: 'Uncommon',  pwr: 70, hyd: 65, res: 74, fact: 'Native to Bolivia and Argentina, jacarandas blanket entire city streets in violet-blue petals.' },
+      { id: 'rafflesia', name: 'Corpse Flower',   latin: 'Rafflesia arnoldii',    icon: '🌺', region: 'Borneo & Sumatra', biome: 'Tropical Rainforest', rarity: 'Legendary', pwr: 99, hyd: 80, res: 76, fact: 'Produces the largest individual flower on Earth—up to 1 meter wide and weighing 11 kg!' }
+    ];
+
+    const NPC_TRADES = [
+      { give: 'poppy', giveQty: 2, get: 'sakura', npc: 'Dora 🗺️' },
+      { give: 'tulip', giveQty: 2, get: 'saguaro', npc: 'Boots 🐒' },
+      { give: 'bluebell', giveQty: 2, get: 'jacaranda', npc: 'Prof. Flora 🔬' },
+      { give: 'orchid', giveQty: 2, get: 'flytrap', npc: 'Prof. Flora 🔬' },
+      { give: 'sunflower', giveQty: 2, get: 'baobab', npc: 'Dora 🗺️' },
+      { give: 'rose', giveQty: 2, get: 'edelweiss', npc: 'Boots 🐒' },
+      { give: 'moonlily', giveQty: 2, get: 'victoria', npc: 'Prof. Flora 🔬' },
+      { give: 'prism', giveQty: 1, get: 'rafflesia', npc: 'Master Botanist 🌟' }
+    ];
+
+    // =========================================================
+    // 3. BLOCKS, TOOLS & RECIPES
+    // =========================================================
+    const WORLD_SIZE = 28, MAX_HEIGHT = 18;
+    const BLOCKS = {
+      grass:     { id: 'grass',     name: 'Grass Block',   icon: '🟩', top: '#5ab549', side: '#78553a', bottom: '#6a4930', grassSide: true, drop: 'dirt' },
+      dirt:      { id: 'dirt',      name: 'Dirt',          icon: '🟫', top: '#6d4c33', side: '#63442d', bottom: '#573b26', drop: 'dirt' },
+      farmland:  { id: 'farmland',  name: 'Farmland',      icon: '🌾', top: '#4a3220', side: '#63442d', bottom: '#573b26', drop: 'dirt' },
+      sand:      { id: 'sand',      name: 'Sand',          icon: '🏖️', top: '#e7d59b', side: '#dfd092', bottom: '#d4c383', drop: 'sand' },
+      stone:     { id: 'stone',     name: 'Cobblestone',   icon: '🪨', top: '#858a91', side: '#777c82', bottom: '#696e75', tool: 'pickaxe', minTier: 1, drop: 'stone' },
+      coal_ore:  { id: 'coal_ore',  name: 'Coal Ore',      icon: '⬛', top: '#787d84', side: '#686d74', bottom: '#5b6067', ore: '#1e293b', tool: 'pickaxe', minTier: 1, drop: 'coal' },
+      iron_ore:  { id: 'iron_ore',  name: 'Iron Ore',      icon: '🪨', top: '#858a91', side: '#777c82', bottom: '#696e75', ore: '#d97706', tool: 'pickaxe', minTier: 2, drop: 'iron_ore' },
+      wood:      { id: 'wood',      name: 'Oak Log',       icon: '🪵', top: '#b88b5a', side: '#6e4a2b', bottom: '#b88b5a', drop: 'wood' },
+      planks:    { id: 'planks',    name: 'Oak Planks',    icon: '🪑', top: '#c4955e', side: '#b88850', bottom: '#ab7c45', drop: 'planks' },
+      leaves:    { id: 'leaves',    name: 'Oak Leaves',    icon: '🌿', top: '#3c8f38', side: '#337d2f', bottom: '#2b6b28', drop: 'sapling' },
+      glass:     { id: 'glass',     name: 'Greenhouse Glass', icon: '🪟', top: '#bae6fd', side: '#bae6fd', bottom: '#bae6fd', transparent: true, opacity: 0.42, drop: 'glass' },
+      beehive:   { id: 'beehive',   name: 'Beehive',       icon: '🍯', top: '#d97706', side: '#f59e0b', bottom: '#b45309', drop: 'beehive' },
+      torch:     { id: 'torch',     name: 'Garden Torch',  icon: '🔥', top: '#fde047', side: '#92400e', bottom: '#78350f', drop: 'torch' },
+      water:     { id: 'water',     name: 'Water',         icon: '💧', top: '#38bdf8', side: '#0ea5e9', bottom: '#0284c7', transparent: true, opacity: 0.75, drop: null }
+    };
+
+    const FLOWERS = [
+      { id: 'poppy',     name: 'Red Poppy',       icon: '🌺', color: 0xef4444, center: 0x1f2937, stem: 0x22c55e, xp: 15 },
+      { id: 'tulip',     name: 'Sunburst Tulip',  icon: '🌷', color: 0xf97316, center: 0xfef08a, stem: 0x16a34a, xp: 20 },
+      { id: 'bluebell',  name: 'Azure Bluebell',  icon: '💠', color: 0x38bdf8, center: 0xe0f2fe, stem: 0x15803d, xp: 20 },
+      { id: 'orchid',    name: 'Violet Orchid',   icon: '🪻', color: 0xa855f7, center: 0xf5d0fe, stem: 0x16a34a, xp: 25 },
+      { id: 'sunflower', name: 'Sunny Sunflower', icon: '🌻', color: 0xfacc15, center: 0x713f12, stem: 0x15803d, xp: 30, tall: true },
+      { id: 'moonlily',  name: 'Moonlight Lily',  icon: '🪷', color: 0x67e8f9, center: 0xffffff, stem: 0x0d9488, xp: 35, glow: true },
+      { id: 'rose',      name: 'Crimson Rose',    icon: '🌹', color: 0xe11d48, center: 0xfda4af, stem: 0x166534, xp: 30 },
+      { id: 'prism',     name: 'Prism Blossom',   icon: '🌈', color: 0xf472b6, center: 0xfef08a, stem: 0x22c55e, xp: 60, rainbow: true }
+    ];
+
+    const ITEMS = {
+      wood_pick:  { id: 'wood_pick',  name: 'Wooden Pickaxe', icon: '⛏️', cat: 'tool', toolType: 'pickaxe', tier: 1 },
+      stone_pick: { id: 'stone_pick', name: 'Stone Pickaxe',  icon: '⛏️', cat: 'tool', toolType: 'pickaxe', tier: 2 },
+      iron_pick:  { id: 'iron_pick',  name: 'Iron Pickaxe',   icon: '⛏️', cat: 'tool', toolType: 'pickaxe', tier: 3 },
+      wood_axe:   { id: 'wood_axe',   name: 'Wooden Axe',     icon: '🪓', cat: 'tool', toolType: 'axe',     tier: 1 },
+      wood_hoe:   { id: 'wood_hoe',   name: 'Wooden Hoe',     icon: '🌾', cat: 'tool', toolType: 'hoe',     tier: 1 },
+      stone_hoe:  { id: 'stone_hoe',  name: 'Stone Hoe',      icon: '🌾', cat: 'tool', toolType: 'hoe',     tier: 2 },
+      wood_sword: { id: 'wood_sword', name: 'Wooden Sword',   icon: '🗡️', cat: 'tool', toolType: 'sword',   tier: 1, dmg: 5 },
+      stone_sword:{ id: 'stone_sword',name: 'Stone Sword',    icon: '🗡️', cat: 'tool', toolType: 'sword',   tier: 2, dmg: 8 },
+      iron_sword: { id: 'iron_sword', name: 'Iron Sword',     icon: '⚔️', cat: 'tool', toolType: 'sword',   tier: 3, dmg: 12 },
+      watercan:   { id: 'watercan',   name: 'Watering Can',   icon: '🚿', cat: 'tool', toolType: 'water',   tier: 1 },
+      bonemeal:   { id: 'bonemeal',   name: 'Bone Meal',      icon: '✨', cat: 'tool', toolType: 'bonemeal', tier: 1 },
+      stick:      { id: 'stick',      name: 'Sticks',         icon: '🥢', cat: 'resource' },
+      coal:       { id: 'coal',       name: 'Coal',           icon: '🪨', cat: 'resource' },
+      iron_ore:   { id: 'iron_ore',   name: 'Raw Iron Ore',   icon: '🟠', cat: 'resource' },
+      iron_ingot: { id: 'iron_ingot', name: 'Iron Ingot',     icon: '🪙', cat: 'resource' },
+      honey:      { id: 'honey',      name: 'Honey Jar',      icon: '🍯', cat: 'food', hunger: 6, hp: 4 },
+      apple:      { id: 'apple',      name: 'Meadow Apple',   icon: '🍎', cat: 'food', hunger: 4, hp: 2 },
+      flower_tea: { id: 'flower_tea', name: 'Herbal Flower Tea', icon: '🍵', cat: 'food', hunger: 8, hp: 8 },
+      sapling:    { id: 'sapling',    name: 'Oak Sapling',    icon: '🌱', cat: 'sapling' }
+    };
+    Object.values(BLOCKS).forEach(b => { if (b.id !== 'water' && b.id !== 'farmland') ITEMS[b.id] = { id: b.id, name: b.name, icon: b.icon, cat: 'block', blockId: b.id }; });
+    FLOWERS.forEach(f => { ITEMS[`seed_${f.id}`] = { id: `seed_${f.id}`, name: `${f.name} Seeds`, icon: f.icon, cat: 'seed', flowerId: f.id }; });
+
+    const CRAFT_RECIPES = [
+      { out: 'planks', qty: 4, req: { wood: 1 }, desc: 'Basic building lumber' },
+      { out: 'stick', qty: 4, req: { planks: 2 }, desc: 'Used for tools & torches' },
+      { out: 'torch', qty: 4, req: { stick: 1, coal: 1 }, desc: 'Lights up your garden at night' },
+      { out: 'wood_hoe', qty: 1, req: { planks: 2, stick: 2 }, desc: 'Till grass/dirt into Farmland' },
+      { out: 'wood_pick', qty: 1, req: { planks: 3, stick: 2 }, desc: 'Mine Stone & Coal Ore' },
+      { out: 'stone_pick', qty: 1, req: { stone: 3, stick: 2 }, desc: 'Mine Iron Ore!' },
+      { out: 'iron_pick', qty: 1, req: { iron_ingot: 3, stick: 2 }, desc: 'Fastest mining pickaxe' },
+      { out: 'stone_sword', qty: 1, req: { stone: 2, stick: 1 }, desc: 'Defend against Night Slimes' },
+      { out: 'watercan', qty: 1, req: { iron_ingot: 2 }, desc: 'Water flowers to boost growth' },
+      { out: 'bonemeal', qty: 3, req: { seed_poppy: 2, dirt: 1 }, desc: 'Compost for instant blooms' },
+      { out: 'beehive', qty: 1, req: { planks: 4, seed_sunflower: 1 }, desc: 'Produces Honey Jars' },
+      { out: 'flower_tea', qty: 1, req: { seed_poppy: 1, seed_bluebell: 1, apple: 1 }, desc: 'Restores +8 Hunger & +8 HP' }
+    ];
+    const FURNACE_RECIPES = [
+      { out: 'iron_ingot', qty: 1, req: { iron_ore: 1, coal: 1 }, desc: 'Smelt Raw Iron Ore using Coal' },
+      { out: 'glass', qty: 2, req: { sand: 2, coal: 1 }, desc: 'Smelt Sand into Greenhouse Glass' },
+      { out: 'coal', qty: 1, req: { wood: 2 }, desc: 'Charcoal: burn Oak Logs into Coal' }
+    ];
+
+    // =========================================================
+    // 4. STATE
+    // =========================================================
+    const state = {
+      playerName: 'Explorer',
+      playerTag: Math.floor(1000 + Math.random() * 9000),
+      playerAvatar: '🧭',
+      groupCode: 'BOTANY-CLUB-1',
+      groupMembers: ['🧭 Explorer#1001', '🗺️ Dora#2026', '🐒 Boots#7712'],
+      cards: { poppy: 1, tulip: 1 }, // Collected Pokémon-style Plant Cards
+      creative: false, flyMode: false, hp: 20, hunger: 20, xp: 0,
+      selectedHotbar: 0, clickMode: 'use', craftTab: 'table', cardsTab: 'binder',
+      timeOfDay: 0.22, raining: false, pointerLocked: false,
+      draggingLook: false, dragDistance: 0, lastMouse: { x: 0, y: 0 },
+      pointerNDC: new THREE.Vector2(0, 0), keys: {},
+      touchMove: { forward: false, backward: false, left: false, right: false },
+      turnButtons: { left: false, right: false },
+      hotbar: ['wood_hoe', 'wood_pick', 'watercan', 'bonemeal', 'seed_poppy', 'seed_tulip', 'seed_bluebell', 'apple', 'torch'],
+      inv: { wood_hoe: 1, wood_pick: 1, watercan: 1, bonemeal: 3, seed_poppy: 5, seed_tulip: 4, seed_bluebell: 4, seed_orchid: 2, seed_sunflower: 2, apple: 3, torch: 4, planks: 8 },
+      quests: [
+        { id: 'pond', title: '1. Whispering Pond', desc: 'Plant or water a flower near the sandy pond.', x: 19, z: 11, done: false },
+        { id: 'orchard', title: '2. Sunny Orchard', desc: 'Chop an Oak Log from the trees.', x: 5, z: 5, done: false },
+        { id: 'starlight', title: '3. Starlight Garden', desc: 'Bloom a Moonlight Lily or Prism Blossom!', x: 14, z: 14, done: false }
+      ]
+    };
+
+    const voxelMap = new Map(), flowerMap = new Map(), torchLights = new Map();
+    const mobs = [], particles = [], butterflies = [];
+    let swiper = null, boots = null;
+
+    // =========================================================
+    // 5. THREE.JS SCENE
+    // =========================================================
+    const container = document.getElementById('game-container'), canvas = document.getElementById('game-canvas');
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x87ceeb); scene.fog = new THREE.FogExp2(0x87ceeb, 0.015);
+    const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 140);
+    const player = { pos: new THREE.Vector3(14, 7.5, 18), vel: new THREE.Vector3(0, 0, 0), yaw: 0, pitch: -0.22, onGround: false, height: 1.65, speed: 6.2, peakY: 7.5, invulnTimer: 0 };
+
+    const hemiLight = new THREE.HemisphereLight(0xffffff, 0x446633, 0.78); scene.add(hemiLight);
+    const sunLight = new THREE.DirectionalLight(0xfff7e6, 0.95);
+    sunLight.position.set(22, 32, 18); sunLight.castShadow = true;
+    sunLight.shadow.mapSize.width = 1024; sunLight.shadow.mapSize.height = 1024;
+    sunLight.shadow.camera.near = 2; sunLight.shadow.camera.far = 85;
+    const d = 24; sunLight.shadow.camera.left = -d; sunLight.shadow.camera.right = d; sunLight.shadow.camera.top = d; sunLight.shadow.camera.bottom = -d;
+    scene.add(sunLight);
+
+    function makePixelTexture(baseHex, accentHex, grassSide = false, oreHex = null) {
+      const c = document.createElement('canvas'); c.width = 16; c.height = 16;
+      const ctx = c.getContext('2d'); ctx.fillStyle = baseHex; ctx.fillRect(0, 0, 16, 16);
+      for (let x = 0; x < 16; x++) for (let y = 0; y < 16; y++) {
+        const r = Math.random();
+        if (r < 0.25) { ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fillRect(x, y, 1, 1); }
+        else if (r > 0.75) { ctx.fillStyle = 'rgba(0,0,0,0.09)'; ctx.fillRect(x, y, 1, 1); }
+      }
+      if (grassSide && accentHex) { ctx.fillStyle = accentHex; ctx.fillRect(0, 0, 16, 4); for (let x = 0; x < 16; x++) if (Math.random() > 0.45) ctx.fillRect(x, 4, 1, 1 + Math.floor(Math.random() * 2)); }
+      if (oreHex) { ctx.fillStyle = oreHex; [[3,3],[4,3],[3,4],[10,5],[11,5],[11,6],[6,10],[7,10],[6,11],[12,12]].forEach(([ox, oy]) => ctx.fillRect(ox, oy, 2, 2)); }
+      const tex = new THREE.CanvasTexture(c); tex.magFilter = THREE.NearestFilter; tex.minFilter = THREE.NearestFilter; return tex;
+    }
+
+    const blockMaterials = {};
+    Object.values(BLOCKS).forEach(b => {
+      const topTex = makePixelTexture(b.top, null, false, b.ore), sideTex = makePixelTexture(b.side, b.top, b.grassSide, b.ore), botTex = makePixelTexture(b.bottom, null, false, b.ore);
+      const opts = b.transparent ? { transparent: true, opacity: b.opacity || 0.75 } : {};
+      blockMaterials[b.id] = [
+        new THREE.MeshLambertMaterial({ map: sideTex, ...opts }), new THREE.MeshLambertMaterial({ map: sideTex, ...opts }),
+        new THREE.MeshLambertMaterial({ map: topTex, ...opts }), new THREE.MeshLambertMaterial({ map: botTex, ...opts }),
+        new THREE.MeshLambertMaterial({ map: sideTex, ...opts }), new THREE.MeshLambertMaterial({ map: sideTex, ...opts })
+      ];
+    });
+    const hydratedFarmlandMat = new THREE.MeshLambertMaterial({ map: makePixelTexture('#2c1c11') });
+
+    const boxGeo = new THREE.BoxGeometry(1, 1, 1), torchGeo = new THREE.BoxGeometry(0.18, 0.65, 0.18);
+    const blockGroup = new THREE.Group(), flowerGroup = new THREE.Group(), mobGroup = new THREE.Group(), fxGroup = new THREE.Group();
+    scene.add(blockGroup, flowerGroup, mobGroup, fxGroup);
+
+    const highlightMesh = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1.02, 1.02, 1.02)), new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 }));
+    highlightMesh.visible = false; scene.add(highlightMesh);
+
+    // =========================================================
+    // 6. WORLD, CARDS, COMPANIONS & QUESTS
+    // =========================================================
+    const keyOf = (x, y, z) => `${x},${y},${z}`;
+
+    function awardCard(cardId) {
+      const card = PLANT_CARDS.find(c => c.id === cardId);
+      if (!card) return;
+      const isNew = !state.cards[cardId];
+      state.cards[cardId] = (state.cards[cardId] || 0) + 1;
+      updateStats();
+      return { card, isNew };
+    }
+
+    function completeQuest(id) {
+      const q = state.quests.find(x => x.id === id);
+      if (!q || q.done) return;
+      q.done = true; state.xp += 50; addItem('bonemeal', 2); SFX.loHicimos();
+      const allDone = state.quests.every(x => x.done);
+      showToast(allDone ? '🎉 ¡Lo hicimos! All 3 Map Stops Complete! (+50 XP)' : `🗺️ ¡Excelente! ${q.title} Complete! (+50 XP)`);
+      updateStats(); saveLocal();
+    }
+
+    function setBlock(x, y, z, type) {
+      if (x < 0 || x >= WORLD_SIZE || z < 0 || z >= WORLD_SIZE || y < 0 || y >= MAX_HEIGHT) return null;
+      const k = keyOf(x, y, z);
+      if (voxelMap.has(k)) { blockGroup.remove(voxelMap.get(k).mesh); voxelMap.delete(k); }
+      if (torchLights.has(k)) { scene.remove(torchLights.get(k)); torchLights.delete(k); }
+      if (!type) return null;
+      let mesh;
+      if (type === 'torch') {
+        mesh = new THREE.Mesh(torchGeo, new THREE.MeshBasicMaterial({ color: 0xfde047 })); mesh.position.set(x + 0.5, y + 0.35, z + 0.5);
+        const pt = new THREE.PointLight(0xffb74d, 1.4, 9); pt.position.set(x + 0.5, y + 0.8, z + 0.5); scene.add(pt); torchLights.set(k, pt);
+      } else {
+        mesh = new THREE.Mesh(boxGeo, blockMaterials[type]); mesh.position.set(x + 0.5, y + 0.5, z + 0.5);
+        mesh.castShadow = type !== 'water' && type !== 'glass'; mesh.receiveShadow = true;
+      }
+      mesh.userData = { kind: 'block', x, y, z, type }; blockGroup.add(mesh);
+      const entry = { type, mesh, x, y, z, hydrated: false }; voxelMap.set(k, entry); return entry;
+    }
+
+    function removeBlock(x, y, z) {
+      const k = keyOf(x, y, z), entry = voxelMap.get(k);
+      if (!entry) return false;
+      blockGroup.remove(entry.mesh); voxelMap.delete(k);
+      if (torchLights.has(k)) { scene.remove(torchLights.get(k)); torchLights.delete(k); }
+      const fk = keyOf(x, y + 1, z); if (flowerMap.has(fk)) removeFlower(x, y + 1, z);
+      return true;
+    }
+
+    function isNearWater(x, y, z) {
+      for (let dx = -4; dx <= 4; dx++) for (let dz = -4; dz <= 4; dz++) for (let dy = -1; dy <= 1; dy++) {
+        const b = voxelMap.get(keyOf(x + dx, y + dy, z + dz)); if (b && b.type === 'water') return true;
+      }
+      return false;
+    }
+
+    function buildFlowerMesh(flowerDef, stage) {
+      const group = new THREE.Group();
+      const stemMat = new THREE.MeshLambertMaterial({ color: flowerDef.stem });
+      const petalMat = new THREE.MeshLambertMaterial({ color: flowerDef.color, emissive: flowerDef.glow ? new THREE.Color(flowerDef.color) : new THREE.Color(0x000000), emissiveIntensity: flowerDef.glow ? 0.5 : 0 });
+      const centerMat = new THREE.MeshLambertMaterial({ color: flowerDef.center });
+      const scaleH = stage === 0 ? 0.35 : stage === 1 ? 0.7 : (flowerDef.tall ? 1.35 : 1.0), stemH = 0.55 * scaleH;
+      const stem = new THREE.Mesh(new THREE.BoxGeometry(0.09, stemH, 0.09), stemMat); stem.position.y = stemH / 2; group.add(stem);
+      if (stage >= 1) {
+        const leafGeo = new THREE.BoxGeometry(0.22, 0.06, 0.1);
+        const l1 = new THREE.Mesh(leafGeo, stemMat); l1.position.set(0.11, stemH * 0.45, 0); l1.rotation.z = 0.35;
+        const l2 = new THREE.Mesh(leafGeo, stemMat); l2.position.set(-0.11, stemH * 0.6, 0); l2.rotation.z = -0.35;
+        group.add(l1, l2);
+      }
+      if (stage === 0) { const bud = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.14, 0.16), stemMat); bud.position.y = stemH + 0.05; group.add(bud); }
+      else if (stage === 1) { const bud = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.22, 0.2), petalMat); bud.position.y = stemH + 0.1; group.add(bud); }
+      else {
+        const headY = stemH + 0.12, center = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.14, 0.18), centerMat); center.position.y = headY; group.add(center);
+        const pSize = flowerDef.tall ? 0.2 : 0.15;
+        [[pSize,0,0],[-pSize,0,0],[0,0,pSize],[0,0,-pSize],[pSize*0.75,0.04,pSize*0.75],[-pSize*0.75,0.04,pSize*0.75],[pSize*0.75,0.04,-pSize*0.75],[-pSize*0.75,0.04,-pSize*0.75]].forEach(([ox, oy, oz]) => {
+          const p = new THREE.Mesh(new THREE.BoxGeometry(pSize, 0.09, pSize), petalMat); p.position.set(ox, headY + oy, oz); group.add(p);
+        });
+      }
+      return group;
+    }
+
+    function plantFlower(x, y, z, flowerId, stage = 0, growth = 0) {
+      const k = keyOf(x, y, z); if (flowerMap.has(k) || voxelMap.has(k)) return false;
+      const below = voxelMap.get(keyOf(x, y - 1, z));
+      if (!below || (below.type !== 'grass' && below.type !== 'dirt' && below.type !== 'farmland')) return false;
+      const def = FLOWERS.find(f => f.id === flowerId); if (!def) return false;
+      const mesh = buildFlowerMesh(def, stage); mesh.position.set(x + 0.5, y, z + 0.5);
+      mesh.rotation.y = ((x * 7 + z * 13) % 4) * (Math.PI / 2); mesh.userData = { kind: 'flower', x, y, z, flowerId };
+      flowerGroup.add(mesh);
+      flowerMap.set(k, { id: flowerId, stage, growth, watered: false, mesh, x, y, z, swayOffset: Math.random() * Math.PI * 2 });
+      if (Math.hypot(x - 19.5, z - 11.5) < 5.5) completeQuest('pond');
+      if (stage === 2 && (flowerId === 'moonlily' || flowerId === 'prism')) completeQuest('starlight');
+      updateStats(); return true;
+    }
+
+    function upgradeFlowerStage(entry, newStage) {
+      if (entry.stage === newStage) return;
+      const def = FLOWERS.find(f => f.id === entry.id); flowerGroup.remove(entry.mesh);
+      const mesh = buildFlowerMesh(def, newStage); mesh.position.set(entry.x + 0.5, entry.y, entry.z + 0.5);
+      mesh.rotation.y = ((entry.x * 7 + entry.z * 13) % 4) * (Math.PI / 2); mesh.userData = { kind: 'flower', x: entry.x, y: entry.y, z: entry.z, flowerId: entry.id };
+      flowerGroup.add(mesh); entry.mesh = mesh; entry.stage = newStage;
+      if (newStage === 2) {
+        spawnParticles(entry.x + 0.5, entry.y + 0.7, entry.z + 0.5, def.color, 10);
+        if (entry.id === 'moonlily' || entry.id === 'prism') completeQuest('starlight');
+        updateStats(); tryCrossBreed(entry.x, entry.y, entry.z, entry.id);
+      }
+    }
+
+    function tryCrossBreed(x, y, z, id) {
+      const below = voxelMap.get(keyOf(x, y - 1, z)); if (!below || below.type !== 'farmland') return;
+      const pairs = { 'poppy+tulip': 'rose', 'tulip+poppy': 'rose', 'bluebell+orchid': 'moonlily', 'orchid+bluebell': 'moonlily', 'moonlily+sunflower': 'prism', 'sunflower+moonlily': 'prism' };
+      [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dx, dz]) => {
+        const neighbor = flowerMap.get(keyOf(x + dx, y, z + dz));
+        if (neighbor && neighbor.stage === 2) {
+          const hybrid = pairs[`${id}+${neighbor.id}`];
+          if (hybrid && Math.random() < 0.65) {
+            for (const [sx, sz] of [[0,1],[1,0],[0,-1],[-1,0]]) {
+              if (plantFlower(x + sx, y, z + sz, hybrid, 1, 0.5)) { showToast(`✨ Cross-bred a rare ${FLOWERS.find(f => f.id === hybrid).name}!`); SFX.bloom(); break; }
+            }
+          }
+        }
+      });
+    }
+
+    function removeFlower(x, y, z) {
+      const k = keyOf(x, y, z), entry = flowerMap.get(k);
+      if (!entry) return null;
+      flowerGroup.remove(entry.mesh); flowerMap.delete(k); updateStats(); return entry;
+    }
+
+    function growTree(tx, baseY, tz) {
+      for (let y = baseY; y <= baseY + 2; y++) setBlock(tx, y, tz, 'wood');
+      for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+        setBlock(tx + dx, baseY + 3, tz + dz, 'leaves');
+        if (Math.abs(dx) + Math.abs(dz) <= 1) setBlock(tx + dx, baseY + 4, tz + dz, 'leaves');
+      }
+    }
+
+    function spawnBoots() {
+      const g = new THREE.Group(), blueMat = new THREE.MeshLambertMaterial({ color: 0x60a5fa }), redMat = new THREE.MeshLambertMaterial({ color: 0xef4444 });
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.5, 0.35), blueMat); body.position.y = 0.45;
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.38, 0.38), blueMat); head.position.y = 0.88;
+      const bootL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.2, 0.22), redMat); bootL.position.set(-0.12, 0.1, 0.04);
+      const bootR = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.2, 0.22), redMat); bootR.position.set(0.12, 0.1, 0.04);
+      g.add(body, head, bootL, bootR); g.position.set(12, 5, 16); mobGroup.add(g);
+      boots = { group: g, giftTimer: 24 };
+    }
+
+    function spawnSwiper() {
+      if (swiper || flowerMap.size === 0) return;
+      const blooms = [...flowerMap.values()].filter(f => f.stage === 2); if (!blooms.length) return;
+      const target = blooms[Math.floor(Math.random() * blooms.length)];
+      const g = new THREE.Group(), orangeMat = new THREE.MeshLambertMaterial({ color: 0xf97316 }), maskMat = new THREE.MeshLambertMaterial({ color: 0x1e293b });
+      const body = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.45, 0.8), orangeMat); body.position.y = 0.35;
+      const head = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.4, 0.45), orangeMat); head.position.set(0, 0.72, 0.3);
+      const mask = new THREE.Mesh(new THREE.BoxGeometry(0.47, 0.14, 0.12), maskMat); mask.position.set(0, 0.76, 0.5);
+      g.add(body, head, mask);
+      const sx = target.x > 14 ? 2 : WORLD_SIZE - 3, sz = target.z > 14 ? 2 : WORLD_SIZE - 3;
+      g.position.set(sx, getSurfaceY(sx, sz) + 1.1, sz); g.userData = { kind: 'swiper' }; mobGroup.add(g);
+      swiper = { group: g, targetKey: keyOf(target.x, target.y, target.z), tx: target.x + 0.5, tz: target.z + 0.5 };
+      document.getElementById('swiper-banner').classList.remove('hidden'); SFX.swiper();
+    }
+
+    function stopSwiper() {
+      if (!swiper) return;
+      spawnParticles(swiper.group.position.x, swiper.group.position.y + 0.5, swiper.group.position.z, 0xf97316, 12);
+      mobGroup.remove(swiper.group); swiper = null; document.getElementById('swiper-banner').classList.add('hidden');
+      addItem('seed_sunflower', 1); addItem('bonemeal', 1); state.xp += 30; SFX.bloom(); updateStats();
+      showToast('🦊 Swiper: "Oh man!" (+1 Sunflower Seed, +1 Bone Meal, +30 XP)');
+    }
+
+    function spawnSlime() {
+      if (mobs.length >= 4) return;
+      const sx = 4 + Math.floor(Math.random() * (WORLD_SIZE - 8)), sz = 4 + Math.floor(Math.random() * (WORLD_SIZE - 8)), sy = getSurfaceY(sx, sz);
+      if (sy < 1) return;
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.75, 0.75), new THREE.MeshLambertMaterial({ color: 0x84cc16, transparent: true, opacity: 0.85 }));
+      mesh.position.set(sx + 0.5, sy + 1.4, sz + 0.5);
+      const id = `slime_${Date.now()}_${Math.random()}`; mesh.userData = { kind: 'mob', mobId: id }; mobGroup.add(mesh);
+      mobs.push({ id, mesh, hp: 15, hopTimer: Math.random() });
+    }
+
+    // =========================================================
+    // 7. PARTICLES, BUTTERFLIES & TERRAIN
+    // =========================================================
+    const particleGeo = new THREE.BoxGeometry(0.08, 0.08, 0.08);
+    function spawnParticles(x, y, z, colorHex, count = 8) {
+      const mat = new THREE.MeshBasicMaterial({ color: colorHex });
+      for (let i = 0; i < count; i++) {
+        const m = new THREE.Mesh(particleGeo, mat); m.position.set(x + (Math.random() - 0.5) * 0.4, y, z + (Math.random() - 0.5) * 0.4); fxGroup.add(m);
+        particles.push({ mesh: m, vel: new THREE.Vector3((Math.random() - 0.5) * 2.2, 1.5 + Math.random() * 2.2, (Math.random() - 0.5) * 2.2), life: 0.7 + Math.random() * 0.4 });
+      }
+    }
+
+    function spawnButterflies() {
+      const colors = [0xfef08a, 0xf9a8d4, 0x93c5fd, 0xfdba74];
+      for (let i = 0; i < 8; i++) {
+        const g = new THREE.Group(), wingMat = new THREE.MeshBasicMaterial({ color: colors[i % colors.length], side: THREE.DoubleSide });
+        const w1 = new THREE.Mesh(new THREE.PlaneGeometry(0.18, 0.14), wingMat); w1.position.x = 0.09;
+        const w2 = new THREE.Mesh(new THREE.PlaneGeometry(0.18, 0.14), wingMat); w2.position.x = -0.09;
+        g.add(w1, w2); g.position.set(6 + Math.random() * 16, 4.5 + Math.random() * 2, 6 + Math.random() * 16); fxGroup.add(g);
+        butterflies.push({ group: g, w1, w2, angle: Math.random() * Math.PI * 2, speed: 0.6 + Math.random() * 0.6, center: new THREE.Vector3(14 + (Math.random() - 0.5) * 10, 4.5, 14 + (Math.random() - 0.5) * 10) });
+      }
+    }
+
+    const rainDrops = [], rainGeo = new THREE.BoxGeometry(0.03, 0.35, 0.03), rainMat = new THREE.MeshBasicMaterial({ color: 0xbae6fd, transparent: true, opacity: 0.65 });
+    for (let i = 0; i < 90; i++) {
+      const r = new THREE.Mesh(rainGeo, rainMat); r.position.set(Math.random() * WORLD_SIZE, 6 + Math.random() * 12, Math.random() * WORLD_SIZE);
+      r.visible = false; fxGroup.add(r); rainDrops.push(r);
+    }
+
+    function clearWorld() {
+      voxelMap.forEach(v => blockGroup.remove(v.mesh)); voxelMap.clear();
+      torchLights.forEach(l => scene.remove(l)); torchLights.clear();
+      flowerMap.forEach(f => flowerGroup.remove(f.mesh)); flowerMap.clear();
+      mobs.forEach(m => mobGroup.remove(m.mesh)); mobs.length = 0;
+    }
+
+    function getSurfaceY(x, z) { for (let y = MAX_HEIGHT - 1; y >= 0; y--) if (voxelMap.has(keyOf(x, y, z))) return y; return -1; }
+
+    function generateMeadow() {
+      clearWorld();
+      for (let x = 0; x < WORLD_SIZE; x++) for (let z = 0; z < WORLD_SIZE; z++) {
+        const distFromCenter = Math.hypot(x - 14, z - 14);
+        const hill = Math.round(3 + Math.sin(x * 0.22) * 1.1 + Math.cos(z * 0.22) * 1.1 + (distFromCenter > 10 ? 1 : 0));
+        const pondDist = Math.hypot(x - 19.5, z - 11.5);
+        const isPond = pondDist < 2.6, isShore = !isPond && pondDist < 3.7, topY = isPond ? 2 : Math.max(2, hill);
+        for (let y = 0; y <= topY; y++) {
+          let type = 'stone';
+          if (y === 0) type = 'stone';
+          else if (y < topY - 1) { const r = Math.random(); type = r < 0.08 ? 'coal_ore' : r < 0.13 ? 'iron_ore' : 'stone'; }
+          else if (y === topY - 1) type = 'dirt';
+          else if (y === topY) type = isPond || isShore ? 'sand' : 'grass';
+          setBlock(x, y, z, type);
+        }
+        if (isPond) setBlock(x, 3, z, 'water');
+      }
+      [[5, 5], [23, 22], [6, 21]].forEach(([tx, tz]) => { const sy = getSurfaceY(tx, tz); if (sy > 0) growTree(tx, sy + 1, tz); });
+      [[12, 13, 'poppy', 2], [13, 12, 'tulip', 2], [15, 13, 'bluebell', 2], [14, 15, 'sunflower', 2]].forEach(([fx, fz, fid, st]) => {
+        const sy = getSurfaceY(fx, fz); if (sy >= 0) plantFlower(fx, sy + 1, fz, fid, st, 1);
+      });
+      player.pos.set(14, getSurfaceY(14, 18) + 2.5, 18); player.vel.set(0, 0, 0); player.peakY = player.pos.y;
+      updateStats();
+    }
+
+    function exportGardenJSON() {
+      const blocks = []; voxelMap.forEach(v => blocks.push([v.x, v.y, v.z, v.type]));
+      const flowers = []; flowerMap.forEach(f => flowers.push([f.x, f.y, f.z, f.id, f.stage]));
+      return JSON.stringify({
+        author: `${state.playerAvatar} ${state.playerName}#${state.playerTag}`,
+        groupCode: state.groupCode,
+        xp: state.xp, inv: state.inv, hotbar: state.hotbar, cards: state.cards, quests: state.quests, blocks, flowers
+      });
+    }
+
+    function importGardenJSON(jsonStr, mergeOnly = false) {
+      const data = JSON.parse(jsonStr);
+      if (!data || !Array.isArray(data.flowers)) throw new Error('Invalid snapshot');
+      if (mergeOnly) {
+        let added = 0;
+        data.flowers.forEach(([x, y, z, id, stage]) => {
+          if (plantFlower(x, y, z, id, stage, stage === 2 ? 1 : 0.2)) added++;
+        });
+        if (data.author && !state.groupMembers.includes(data.author)) state.groupMembers.push(data.author);
+        updateStats();
+        showToast(`🤝 Merged ${added} flowers from ${data.author || 'collaborator'}!`);
+        return;
+      }
+      clearWorld();
+      if (Array.isArray(data.blocks)) data.blocks.forEach(([x, y, z, type]) => setBlock(x, y, z, type));
+      data.flowers.forEach(([x, y, z, id, stage]) => plantFlower(x, y, z, id, stage, stage === 2 ? 1 : 0.2));
+      if (typeof data.xp === 'number') state.xp = data.xp;
+      if (data.inv) state.inv = data.inv;
+      if (data.hotbar) state.hotbar = data.hotbar;
+      if (data.cards) state.cards = data.cards;
+      if (data.quests) state.quests = data.quests;
+      updateStats(); renderHotbar();
+    }
+
+    function saveLocal() {
+      try {
+        localStorage.setItem('bloomcraft_world_cards_v4', JSON.stringify({
+          playerName: state.playerName, playerTag: state.playerTag, playerAvatar: state.playerAvatar,
+          groupCode: state.groupCode, groupMembers: state.groupMembers,
+          world: exportGardenJSON()
+        }));
+      } catch (e) {}
+    }
+
+    function loadLocal() {
+      try {
+        const raw = localStorage.getItem('bloomcraft_world_cards_v4');
+        if (!raw) return false;
+        const wrap = JSON.parse(raw);
+        if (wrap.playerName) state.playerName = wrap.playerName;
+        if (wrap.playerTag) state.playerTag = wrap.playerTag;
+        if (wrap.playerAvatar) state.playerAvatar = wrap.playerAvatar;
+        if (wrap.groupCode) state.groupCode = wrap.groupCode;
+        if (Array.isArray(wrap.groupMembers)) state.groupMembers = wrap.groupMembers;
+        if (wrap.world) importGardenJSON(wrap.world, false);
+        return true;
+      } catch (e) { return false; }
+    }
+
+    // =========================================================
+    // 8. INVENTORY, MINING & INTERACTION
+    // =========================================================
+    function addItem(id, qty = 1) {
+      if (!id || !ITEMS[id]) return;
+      state.inv[id] = (state.inv[id] || 0) + qty;
+      if (!state.hotbar.includes(id)) {
+        const emptyIdx = state.hotbar.findIndex(s => !s || (!state.creative && (state.inv[s] || 0) <= 0));
+        if (emptyIdx !== -1) state.hotbar[emptyIdx] = id;
+      }
+      renderHotbar();
+    }
+
+    function consumeItem(id, qty = 1) {
+      if (state.creative) return true;
+      if ((state.inv[id] || 0) < qty) return false;
+      state.inv[id] -= qty; if (state.inv[id] <= 0) delete state.inv[id];
+      renderHotbar(); return true;
+    }
+
+    function getActiveItem() {
+      const id = state.hotbar[state.selectedHotbar];
+      if (!id) return null;
+      if (!state.creative && (state.inv[id] || 0) <= 0) return null;
+      return ITEMS[id] || null;
+    }
+
+    const raycaster = new THREE.Raycaster(); raycaster.far = 10; const screenCenter = new THREE.Vector2(0, 0);
+    function getTargetHit() {
+      raycaster.setFromCamera(state.pointerLocked ? screenCenter : state.pointerNDC, camera);
+      const hits = raycaster.intersectObjects([...mobGroup.children, ...flowerGroup.children, ...blockGroup.children], true);
+      if (!hits.length) return null;
+      let obj = hits[0].object; while (obj && !obj.userData?.kind && obj.parent) obj = obj.parent;
+      return (!obj || !obj.userData?.kind) ? null : { hit: hits[0], data: obj.userData };
+    }
+
+    function handlePrimaryAction() {
+      const target = getTargetHit(); if (!target) return;
+      const { data } = target, held = getActiveItem();
+      if (data.kind === 'swiper') { stopSwiper(); return; }
+      if (data.kind === 'mob') {
+        const idx = mobs.findIndex(m => m.id === data.mobId); if (idx === -1) return;
+        const m = mobs[idx]; m.hp -= (held?.toolType === 'sword' ? held.dmg : 2); SFX.hit();
+        spawnParticles(m.mesh.position.x, m.mesh.position.y, m.mesh.position.z, 0x84cc16, 8);
+        if (m.hp <= 0) { mobGroup.remove(m.mesh); mobs.splice(idx, 1); state.xp += 25; addItem('bonemeal', 2); showToast('Defeated Garden Slime! +2 Bone Meal'); updateStats(); saveLocal(); }
+        return;
+      }
+      if (data.kind === 'flower') {
+        const entry = removeFlower(data.x, data.y, data.z); if (!entry) return;
+        const def = FLOWERS.find(f => f.id === entry.id);
+        if (entry.stage === 2) {
+          const gained = 2 + Math.floor(Math.random() * 2);
+          addItem(`seed_${entry.id}`, gained); state.xp += def.xp;
+          const res = awardCard(entry.id);
+          SFX.bloom(); spawnParticles(data.x + 0.5, data.y + 0.5, data.z + 0.5, def.color, 12);
+          showToast(res?.isNew ? `🃏 NEW CARD UNLOCKED: ${res.card.name} (${res.card.latin})!` : `¡Excelente! Harvested ${def.name} + 🃏 Card!`);
+        } else { addItem(`seed_${entry.id}`, 1); SFX.dig(); }
+        updateStats(); saveLocal(); return;
+      }
+      if (data.kind === 'block') {
+        if (data.y === 0) { showToast('Bedrock cannot be mined!'); return; }
+        const bDef = BLOCKS[data.type];
+        if (!state.creative && bDef.minTier) {
+          const hasTier = (held?.toolType === bDef.tool) ? held.tier : 0;
+          if (hasTier < bDef.minTier) { showToast(`Need a ${bDef.minTier === 2 ? 'Stone' : 'Wooden'} Pickaxe!`); return; }
+        }
+        removeBlock(data.x, data.y, data.z); SFX.dig();
+        spawnParticles(data.x + 0.5, data.y + 0.5, data.z + 0.5, 0x8b5a2b, 8);
+        if (data.type === 'wood') completeQuest('orchard');
+        if (bDef.drop) {
+          if (data.type === 'leaves') { if (Math.random() < 0.35) addItem('apple', 1); if (Math.random() < 0.45) addItem('sapling', 1); }
+          else addItem(bDef.drop, 1);
+        }
+        saveLocal();
+      }
+    }
+
+    function handleSecondaryAction() {
+      const held = getActiveItem();
+      if (held && held.cat === 'food') {
+        if (state.hunger >= 20 && state.hp >= 20 && !state.creative) { showToast('Already full!'); return; }
+        consumeItem(held.id, 1); state.hunger = Math.min(20, state.hunger + (held.hunger || 4)); state.hp = Math.min(20, state.hp + (held.hp || 2));
+        SFX.eat(); updateStats(); showToast(`¡Delicioso! Ate ${held.name}!`); saveLocal(); return;
+      }
+      const target = getTargetHit(); if (!target) return;
+      const { hit, data } = target;
+      if (data.kind === 'swiper') { stopSwiper(); return; }
+      if (data.kind === 'block' && data.type === 'beehive') { addItem('honey', 1); SFX.bloom(); showToast('Collected 🍯 Honey Jar!'); saveLocal(); return; }
+      if (!held) { showToast('Select an item in your hotbar!'); return; }
+
+      if (held.toolType === 'hoe' && data.kind === 'block' && (data.type === 'grass' || data.type === 'dirt')) {
+        const f = setBlock(data.x, data.y, data.z, 'farmland');
+        if (f && isNearWater(data.x, data.y, data.z)) { f.hydrated = true; f.mesh.material = hydratedFarmlandMat; }
+        SFX.till(); showToast(f?.hydrated ? 'Tilled Hydrated Farmland (2.5× growth!)' : 'Tilled Farmland'); saveLocal(); return;
+      }
+      if (held.cat === 'seed') {
+        if (data.kind === 'flower') { showToast('A flower is already here!'); return; }
+        if (plantFlower(data.x, data.y + 1, data.z, held.flowerId, 0, 0)) {
+          consumeItem(held.id, 1); SFX.plant(); spawnParticles(data.x + 0.5, data.y + 1.3, data.z + 0.5, 0x4ade80, 6); saveLocal();
+        } else showToast('Plant seeds on Grass, Dirt, or Farmland!');
+        return;
+      }
+      if (held.cat === 'sapling' && data.kind === 'block' && (data.type === 'grass' || data.type === 'dirt')) {
+        consumeItem(held.id, 1); growTree(data.x, data.y + 1, data.z); SFX.bloom(); showToast('🌳 Grew an Oak Tree!'); saveLocal(); return;
+      }
+      if (held.toolType === 'water') {
+        const fx = data.x, fy = data.kind === 'flower' ? data.y : data.y + 1, fz = data.z;
+        const entry = flowerMap.get(keyOf(fx, fy, fz)); SFX.water(); spawnParticles(fx + 0.5, fy + 0.5, fz + 0.5, 0x38bdf8, 10);
+        if (Math.hypot(fx - 19.5, fz - 11.5) < 5.5) completeQuest('pond');
+        if (entry && entry.stage < 2) {
+          entry.watered = true; entry.growth += 0.55;
+          if (entry.growth >= 1) { upgradeFlowerStage(entry, 2); SFX.bloom(); } else if (entry.growth >= 0.45 && entry.stage < 1) upgradeFlowerStage(entry, 1);
+          saveLocal();
+        }
+        return;
+      }
+      if (held.toolType === 'bonemeal') {
+        const fx = data.x, fy = data.kind === 'flower' ? data.y : data.y + 1, fz = data.z;
+        const entry = flowerMap.get(keyOf(fx, fy, fz));
+        if (entry && entry.stage < 2) { consumeItem('bonemeal', 1); upgradeFlowerStage(entry, 2); entry.growth = 1; SFX.bloom(); saveLocal(); }
+        else if (data.kind === 'block' && (data.type === 'grass' || data.type === 'farmland')) {
+          consumeItem('bonemeal', 1); const randomF = FLOWERS[Math.floor(Math.random() * 5)];
+          if (plantFlower(data.x, data.y + 1, data.z, randomF.id, 2, 1)) { SFX.bloom(); showToast(`Wild ${randomF.name} sprouted!`); saveLocal(); }
+        }
+        return;
+      }
+      if (held.cat === 'block' && data.kind === 'block') {
+        const n = hit.face.normal, nx = data.x + Math.round(n.x), ny = data.y + Math.round(n.y), nz = data.z + Math.round(n.z);
+        const dx = Math.abs(player.pos.x - (nx + 0.5)), dz = Math.abs(player.pos.z - (nz + 0.5)), dy = player.pos.y - ny;
+        if (dx < 0.7 && dz < 0.7 && dy > -0.2 && dy < 1.8) return;
+        if (setBlock(nx, ny, nz, held.blockId)) { consumeItem(held.id, 1); SFX.place(); saveLocal(); }
+      }
+    }
+
+    // =========================================================
+    // 9. UI: CARDS BINDER, TRADING, GROUP HUB, MAP, BACKPACK
+    // =========================================================
+    const hotbarEl = document.getElementById('hotbar'), toastEl = document.getElementById('toast');
+    let toastTimer = null;
+    function showToast(msg) { toastEl.textContent = msg; toastEl.classList.remove('hidden-toast'); clearTimeout(toastTimer); toastTimer = setTimeout(() => toastEl.classList.add('hidden-toast'), 2800); }
+
+    function updateStats() {
+      const unlockedCount = PLANT_CARDS.filter(c => (state.cards[c.id] || 0) > 0).length;
+      document.getElementById('stat-cards').textContent = unlockedCount;
+      document.getElementById('stat-score').textContent = state.xp;
+      document.getElementById('stat-hp').textContent = state.creative ? '∞' : Math.ceil(state.hp);
+      document.getElementById('stat-hunger').textContent = state.creative ? '∞' : Math.ceil(state.hunger);
+      document.getElementById('hud-player-id').textContent = `${state.playerName}#${state.playerTag}`;
+      document.getElementById('hud-avatar').textContent = state.playerAvatar;
+    }
+
+    function renderHotbar() {
+      const active = getActiveItem();
+      document.getElementById('selected-item-label').textContent = active ? `${active.icon} ${active.name} (${state.creative ? '∞' : state.inv[active.id] || 0})` : '✋ Empty Hand';
+      hotbarEl.innerHTML = '';
+      state.hotbar.forEach((itemId, idx) => {
+        const item = itemId ? ITEMS[itemId] : null, count = item ? (state.creative ? '∞' : (state.inv[itemId] || 0)) : 0;
+        const visible = item && (state.creative || count > 0);
+        const btn = document.createElement('button');
+        btn.className = `hotbar-slot relative w-12 h-12 shrink-0 rounded-xl border border-white/20 bg-white/10 flex items-center justify-center text-xl ${idx === state.selectedHotbar ? 'active' : 'hover:bg-white/20'}`;
+        btn.innerHTML = `<span class="absolute top-0.5 left-1 text-[9px] text-slate-300 font-mono">${idx + 1}</span><span>${visible ? item.icon : ''}</span>${visible ? `<span class="absolute bottom-0.5 right-1 text-[10px] font-bold text-white">${count}</span>` : ''}`;
+        btn.addEventListener('click', (e) => { e.stopPropagation(); state.selectedHotbar = idx; renderHotbar(); });
+        hotbarEl.appendChild(btn);
+      });
+    }
+
+    function renderCardsModal() {
+      const binderEl = document.getElementById('cards-binder-view'), tradeEl = document.getElementById('cards-trade-view');
+      binderEl.classList.toggle('hidden', state.cardsTab !== 'binder');
+      tradeEl.classList.toggle('hidden', state.cardsTab !== 'trade');
+
+      const rarityColors = {
+        Common: 'border-emerald-400/60 from-emerald-950/80 to-slate-900',
+        Uncommon: 'border-sky-400/70 from-sky-950/80 to-slate-900',
+        Rare: 'border-purple-400/80 from-purple-950/80 to-slate-900',
+        Legendary: 'border-amber-400 from-amber-950/70 via-fuchsia-950/60 to-slate-900'
+      };
+
+      binderEl.innerHTML = PLANT_CARDS.map(c => {
+        const qty = state.cards[c.id] || 0;
+        const locked = qty <= 0;
+        return `
+          <div class="poke-card rounded-2xl border-2 p-3 bg-gradient-to-br ${locked ? 'border-slate-700 from-slate-900 to-slate-950 opacity-55' : rarityColors[c.rarity]} flex flex-col justify-between gap-2">
+            <div>
+              <div class="flex items-center justify-between gap-1">
+                <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/10 text-amber-300">${c.rarity}</span>
+                <span class="text-[11px] font-extrabold ${locked ? 'text-slate-500' : 'text-emerald-300'}">${locked ? 'Undiscovered' : `Owned ×${qty}`}</span>
+              </div>
+              <div class="flex items-center gap-2.5 mt-2">
+                <div class="w-12 h-12 rounded-xl bg-slate-950/80 border border-white/15 flex items-center justify-center text-3xl shrink-0">${locked ? '❓' : c.icon}</div>
+                <div class="min-w-0">
+                  <div class="text-sm font-extrabold text-white truncate">${c.name}</div>
+                  <div class="text-[11px] italic text-sky-300 truncate">${c.latin}</div>
+                  <div class="text-[10px] text-slate-300 truncate">🌍 ${c.region} • ${c.biome}</div>
+                </div>
+              </div>
+              <p class="text-[11px] text-slate-200 mt-2 leading-relaxed">${locked ? 'Harvest blooms or trade with friends/NPCs to unlock this plant’s botanical card!' : c.fact}</p>
+            </div>
+            <div class="grid grid-cols-3 gap-1 pt-2 border-t border-white/10 text-center text-[10px]">
+              <div class="bg-slate-950/60 rounded-lg py-1">⚡ PWR <strong class="text-amber-300">${c.pwr}</strong></div>
+              <div class="bg-slate-950/60 rounded-lg py-1">💧 HYD <strong class="text-sky-300">${c.hyd}</strong></div>
+              <div class="bg-slate-950/60 rounded-lg py-1">🛡️ RES <strong class="text-emerald-300">${c.res}</strong></div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // Populate Trade Offer dropdown
+      const offerSel = document.getElementById('trade-offer-select');
+      const ownedCards = PLANT_CARDS.filter(c => (state.cards[c.id] || 0) > 0);
+      offerSel.innerHTML = ownedCards.length
+        ? ownedCards.map(c => `<option value="${c.id}">${c.icon} ${c.name} (Owned ×${state.cards[c.id]})</option>`).join('')
+        : '<option value="">No cards owned yet</option>';
+
+      // Populate NPC Trades
+      document.getElementById('npc-trades').innerHTML = NPC_TRADES.map((t, idx) => {
+        const giveCard = PLANT_CARDS.find(c => c.id === t.give), getCard = PLANT_CARDS.find(c => c.id === t.get);
+        const have = state.cards[t.give] || 0, canTrade = have >= t.giveQty;
+        return `
+          <div class="bg-slate-900/90 p-2.5 rounded-xl border border-white/10 flex items-center justify-between gap-2">
+            <div class="text-[11px] min-w-0">
+              <div class="font-bold text-white">${t.npc}</div>
+              <div class="text-slate-300">Give ${t.giveQty}× ${giveCard.icon} ${giveCard.name} → Get ${getCard.icon} <strong class="text-amber-300">${getCard.name}</strong></div>
+            </div>
+            <button data-npc-trade="${idx}" class="npc-trade-btn shrink-0 px-2.5 py-1.5 rounded-lg text-[11px] font-bold ${canTrade ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950' : 'bg-slate-700 text-slate-400 cursor-not-allowed'}">Swap</button>
+          </div>
+        `;
+      }).join('');
+
+      document.querySelectorAll('.npc-trade-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const t = NPC_TRADES[parseInt(btn.dataset.npcTrade, 10)];
+          if ((state.cards[t.give] || 0) < t.giveQty) { showToast(`Need ${t.giveQty}× ${PLANT_CARDS.find(c => c.id === t.give).name} cards!`); return; }
+          state.cards[t.give] -= t.giveQty;
+          const res = awardCard(t.get);
+          SFX.bloom(); saveLocal(); renderCardsModal();
+          showToast(`🤝 Traded with ${t.npc}! Unlocked ${res.card.icon} ${res.card.name}!`);
+        });
+      });
+    }
+
+    function renderGroupModal() {
+      document.getElementById('profile-id-display').textContent = `${state.playerAvatar} ${state.playerName}#${state.playerTag}`;
+      document.getElementById('group-code-label').textContent = state.groupCode;
+      document.getElementById('group-members-list').innerHTML = state.groupMembers.map(m => `<span class="px-2.5 py-1 rounded-full bg-slate-900 border border-white/15 text-[11px] font-semibold text-sky-200">${m}</span>`).join('');
+      document.getElementById('garden-code').value = exportGardenJSON();
+    }
+
+    function renderMapModal() {
+      document.getElementById('quest-stops').innerHTML = state.quests.map(q => `
+        <div class="p-2.5 rounded-2xl border ${q.done ? 'bg-emerald-100 border-emerald-400' : 'bg-white border-amber-300'}">
+          <div class="flex items-center justify-between text-xs font-extrabold"><span>${q.done ? '✅' : '📍'} ${q.title}</span><span class="${q.done ? 'text-emerald-700' : 'text-amber-700'}">${q.done ? 'Complete!' : 'Active'}</span></div>
+          <p class="text-[11px] text-slate-600 mt-0.5">${q.desc}</p>
+        </div>
+      `).join('');
+      const mc = document.getElementById('minimap-canvas'), ctx = mc.getContext('2d'), cell = mc.width / WORLD_SIZE;
+      for (let x = 0; x < WORLD_SIZE; x++) for (let z = 0; z < WORLD_SIZE; z++) {
+        const sy = getSurfaceY(x, z), b = voxelMap.get(keyOf(x, sy, z));
+        ctx.fillStyle = !b ? '#0f172a' : b.type === 'water' ? '#38bdf8' : b.type === 'sand' ? '#fde68a' : b.type === 'leaves' ? '#15803d' : '#4ade80';
+        ctx.fillRect(x * cell, z * cell, cell + 0.5, cell + 0.5);
+      }
+      state.quests.forEach((q, i) => { ctx.fillStyle = q.done ? '#10b981' : '#ef4444'; ctx.beginPath(); ctx.arc(q.x * cell, q.z * cell, 5, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#fff'; ctx.font = 'bold 8px sans-serif'; ctx.fillText(i + 1, q.x * cell - 2.5, q.z * cell + 3); });
+      ctx.fillStyle = '#a855f7'; ctx.beginPath(); ctx.arc(player.pos.x * cell, player.pos.z * cell, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+    }
+
+    function renderInventory() {
+      document.getElementById('inv-active-slot').textContent = `Slot ${state.selectedHotbar + 1}`;
+      const grid = document.getElementById('inventory-grid'), allKeys = Object.keys(ITEMS);
+      const cats = [
+        { title: '🛠️ Tools & Weapons', filter: i => i.cat === 'tool' },
+        { title: '🌸 Flower Seeds & Saplings', filter: i => i.cat === 'seed' || i.cat === 'sapling' },
+        { title: '🧱 Blocks & Resources', filter: i => i.cat === 'block' || i.cat === 'resource' },
+        { title: '🍎 Food & Potions', filter: i => i.cat === 'food' }
+      ];
+      grid.innerHTML = cats.map(c => {
+        const cards = allKeys.map(k => ITEMS[k]).filter(c.filter).filter(i => state.creative || (state.inv[i.id] || 0) > 0).map(item => {
+          const qty = state.creative ? '∞' : state.inv[item.id], isEq = state.hotbar[state.selectedHotbar] === item.id;
+          return `<button data-eq="${item.id}" class="inv-eq text-left p-2.5 rounded-2xl border ${isEq ? 'border-amber-400 bg-amber-400/15' : 'border-white/10 bg-slate-800/80 hover:bg-slate-800'} transition flex items-center gap-2.5"><div class="w-9 h-9 rounded-xl bg-slate-900 flex items-center justify-center text-xl shrink-0">${item.icon}</div><div class="min-w-0 flex-1"><div class="text-xs font-bold text-white truncate">${item.name}</div><div class="text-[11px] text-emerald-300 font-semibold">Qty: ${qty}</div></div></button>`;
+        }).join('');
+        return cards ? `<div><h3 class="text-xs font-bold uppercase tracking-wider text-purple-300 mb-2">${c.title}</h3><div class="grid grid-cols-1 sm:grid-cols-2 gap-2">${cards}</div></div>` : '';
+      }).join('');
+      grid.querySelectorAll('.inv-eq').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.dataset.eq; state.hotbar[state.selectedHotbar] = id; renderHotbar(); toggleModal('inventory-modal', false);
+          showToast(`🎒 Equipped ${ITEMS[id].icon} ${ITEMS[id].name}!`); canvas.focus();
+        });
+      });
+    }
+
+    function renderCrafting() {
+      const recipes = state.craftTab === 'table' ? CRAFT_RECIPES : FURNACE_RECIPES, list = document.getElementById('craft-list');
+      list.innerHTML = recipes.map((r, idx) => {
+        const outItem = ITEMS[r.out], canCraft = state.creative || Object.entries(r.req).every(([k, need]) => (state.inv[k] || 0) >= need);
+        const reqText = Object.entries(r.req).map(([k, need]) => {
+          const have = state.creative ? '∞' : (state.inv[k] || 0);
+          return `<span class="${(state.creative || have >= need) ? 'text-emerald-300' : 'text-rose-400'}">${ITEMS[k]?.icon || ''} ${ITEMS[k]?.name || k}: ${have}/${need}</span>`;
+        }).join(' • ');
+        return `<div class="p-3 rounded-2xl border ${canCraft ? 'border-emerald-500/40 bg-slate-800/90' : 'border-white/10 bg-slate-800/40 opacity-75'} flex flex-col justify-between gap-2"><div class="flex items-center gap-2.5"><div class="w-10 h-10 rounded-xl bg-slate-900 flex items-center justify-center text-2xl shrink-0">${outItem.icon}</div><div class="min-w-0 flex-1"><div class="text-xs font-extrabold text-white">${outItem.name} <span class="text-amber-300">×${r.qty}</span></div><div class="text-[11px] text-slate-400">${r.desc}</div></div></div><div class="text-[10px] leading-relaxed">${reqText}</div><button data-craft-idx="${idx}" class="craft-btn w-full py-1.5 rounded-xl font-bold text-xs transition ${canCraft ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950' : 'bg-slate-700 text-slate-400 cursor-not-allowed'}">${state.craftTab === 'table' ? '⚒️ Craft' : '🔥 Smelt'}</button></div>`;
+      }).join('');
+      list.querySelectorAll('.craft-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const r = recipes[parseInt(btn.dataset.craftIdx, 10)];
+          const canCraft = state.creative || Object.entries(r.req).every(([k, need]) => (state.inv[k] || 0) >= need);
+          if (!canCraft) { showToast('Not enough materials!'); return; }
+          if (!state.creative) Object.entries(r.req).forEach(([k, need]) => consumeItem(k, need));
+          addItem(r.out, r.qty); SFX.craft(); showToast(`Crafted ${r.qty}× ${ITEMS[r.out].name}!`); renderCrafting(); saveLocal();
+        });
+      });
+    }
+
+    const toggleModal = (id, show) => {
+      const el = document.getElementById(id);
+      if (show) { if (document.pointerLockElement) document.exitPointerLock(); el.classList.remove('hidden'); el.classList.add('flex'); }
+      else { el.classList.add('hidden'); el.classList.remove('flex'); }
+    };
+
+    // Modal & Button Bindings
+    document.getElementById('btn-start-game').addEventListener('click', () => {
+      const nm = document.getElementById('welcome-name').value.trim();
+      if (nm) state.playerName = nm;
+      state.playerAvatar = document.getElementById('welcome-avatar').value;
+      const fullId = `${state.playerAvatar} ${state.playerName}#${state.playerTag}`;
+      state.groupMembers[0] = fullId;
+      document.getElementById('welcome-modal').classList.add('hidden');
+      updateStats(); saveLocal(); SFX.init(); SFX.bloom(); window.focus(); canvas.focus();
+    });
+
+    document.getElementById('btn-cards').addEventListener('click', () => { renderCardsModal(); toggleModal('cards-modal', true); });
+    document.getElementById('close-cards').addEventListener('click', () => { toggleModal('cards-modal', false); canvas.focus(); });
+    document.getElementById('cards-tab-binder').addEventListener('click', (e) => {
+      state.cardsTab = 'binder'; e.currentTarget.className = 'px-2.5 py-1 rounded-lg bg-fuchsia-500 text-white font-bold';
+      document.getElementById('cards-tab-trade').className = 'px-2.5 py-1 rounded-lg text-slate-300 hover:text-white font-semibold';
+      renderCardsModal();
+    });
+    document.getElementById('cards-tab-trade').addEventListener('click', (e) => {
+      state.cardsTab = 'trade'; e.currentTarget.className = 'px-2.5 py-1 rounded-lg bg-fuchsia-500 text-white font-bold';
+      document.getElementById('cards-tab-binder').className = 'px-2.5 py-1 rounded-lg text-slate-300 hover:text-white font-semibold';
+      renderCardsModal();
+    });
+
+    document.getElementById('btn-gen-trade').addEventListener('click', () => {
+      const cardId = document.getElementById('trade-offer-select').value;
+      if (!cardId || (state.cards[cardId] || 0) <= 0) { showToast('No card selected!'); return; }
+      const payload = btoa(JSON.stringify({ from: `${state.playerName}#${state.playerTag}`, cardId, nonce: Math.floor(Math.random() * 9999) }));
+      const code = `TRADE-${payload}`;
+      document.getElementById('trade-out-code').value = code;
+      if (navigator.clipboard?.writeText) navigator.clipboard.writeText(code).catch(() => {});
+      showToast('🎟️ Trade Code generated & copied! Share it with a friend.');
+    });
+
+    document.getElementById('btn-redeem-trade').addEventListener('click', () => {
+      const raw = document.getElementById('trade-in-code').value.trim();
+      try {
+        if (!raw.startsWith('TRADE-')) throw new Error('Bad prefix');
+        const data = JSON.parse(atob(raw.replace('TRADE-', '')));
+        const res = awardCard(data.cardId);
+        if (!res) throw new Error('Unknown card');
+        SFX.bloom(); saveLocal(); renderCardsModal();
+        document.getElementById('trade-in-code').value = '';
+        showToast(`🤝 Received ${res.card.icon} ${res.card.name} from ${data.from}!`);
+      } catch (e) { showToast('Invalid Trade Code!'); }
+    });
+
+    document.getElementById('btn-group').addEventListener('click', () => { renderGroupModal(); toggleModal('group-modal', true); });
+    document.getElementById('btn-profile-badge').addEventListener('click', () => { renderGroupModal(); toggleModal('group-modal', true); });
+    document.getElementById('close-group').addEventListener('click', () => { toggleModal('group-modal', false); canvas.focus(); });
+
+    document.getElementById('btn-save-profile').addEventListener('click', () => {
+      const nm = document.getElementById('profile-rename').value.trim();
+      if (!nm) return;
+      state.playerName = nm;
+      state.groupMembers[0] = `${state.playerAvatar} ${state.playerName}#${state.playerTag}`;
+      updateStats(); renderGroupModal(); saveLocal(); showToast(`Updated Gaming ID to ${state.playerName}#${state.playerTag}!`);
+    });
+    document.getElementById('btn-new-group').addEventListener('click', () => {
+      state.groupCode = `GARDEN-${Math.floor(100 + Math.random() * 900)}`;
+      renderGroupModal(); saveLocal(); showToast(`Created Group ${state.groupCode}!`);
+    });
+    document.getElementById('btn-join-group').addEventListener('click', () => {
+      const code = document.getElementById('join-group-input').value.trim().toUpperCase();
+      if (!code) return;
+      state.groupCode = code;
+      renderGroupModal(); saveLocal(); showToast(`Joined Group ${code}!`);
+    });
+    document.getElementById('btn-copy-code').addEventListener('click', () => {
+      const ta = document.getElementById('garden-code'); ta.select();
+      if (navigator.clipboard?.writeText) navigator.clipboard.writeText(ta.value).catch(() => document.execCommand('copy')); else document.execCommand('copy');
+      showToast('Garden snapshot copied!');
+    });
+    document.getElementById('btn-merge-code').addEventListener('click', () => {
+      try { importGardenJSON(document.getElementById('garden-code').value, true); saveLocal(); toggleModal('group-modal', false); }
+      catch (e) { showToast('Invalid snapshot code!'); }
+    });
+    document.getElementById('btn-import-code').addEventListener('click', () => {
+      try { importGardenJSON(document.getElementById('garden-code').value, false); saveLocal(); toggleModal('group-modal', false); showToast('World loaded!'); }
+      catch (e) { showToast('Invalid snapshot code!'); }
+    });
+
+    document.getElementById('btn-mode').addEventListener('click', (e) => { state.creative = !state.creative; e.currentTarget.textContent = state.creative ? 'Creative' : 'Survival'; updateStats(); renderHotbar(); showToast(state.creative ? '✨ Creative Mode!' : '⚔️ Survival Mode!'); });
+    document.getElementById('btn-click-mode').addEventListener('click', (e) => {
+      state.clickMode = state.clickMode === 'use' ? 'mine' : 'use';
+      const btn = e.currentTarget; btn.textContent = state.clickMode === 'use' ? 'Click: 🌱 Use / Plant' : 'Click: ⛏️ Mine / Attack';
+      btn.className = state.clickMode === 'use' ? 'px-2 py-0.5 rounded-full bg-emerald-500 text-slate-950 font-bold transition' : 'px-2 py-0.5 rounded-full bg-rose-500 text-white font-bold transition';
+    });
+    function toggleFlyMode() { state.flyMode = !state.flyMode; player.vel.y = 0; document.getElementById('fly-badge').classList.toggle('hidden', !state.flyMode); showToast(state.flyMode ? '🕊️ Fly Mode ON' : '🚶 Walk Mode ON'); }
+    document.getElementById('btn-fly').addEventListener('click', toggleFlyMode);
+    document.getElementById('btn-pad-toggle').addEventListener('click', () => document.getElementById('touch-controls').classList.toggle('md:hidden'));
+    document.getElementById('btn-stop-swiper').addEventListener('click', stopSwiper);
+    document.getElementById('btn-map').addEventListener('click', () => { renderMapModal(); toggleModal('map-modal', true); });
+    document.getElementById('close-map').addEventListener('click', () => { toggleModal('map-modal', false); canvas.focus(); });
+    document.getElementById('btn-inventory').addEventListener('click', () => { renderInventory(); toggleModal('inventory-modal', true); });
+    document.getElementById('close-inventory').addEventListener('click', () => { toggleModal('inventory-modal', false); canvas.focus(); });
+    document.getElementById('btn-craft').addEventListener('click', () => { renderCrafting(); toggleModal('craft-modal', true); });
+    document.getElementById('close-craft').addEventListener('click', () => { toggleModal('craft-modal', false); canvas.focus(); });
+    document.getElementById('craft-tab-table').addEventListener('click', (e) => { state.craftTab = 'table'; e.currentTarget.className = 'px-2.5 py-1 rounded-lg bg-amber-400 text-slate-950 font-bold'; document.getElementById('craft-tab-furnace').className = 'px-2.5 py-1 rounded-lg text-slate-300 hover:text-white font-semibold'; renderCrafting(); });
+    document.getElementById('craft-tab-furnace').addEventListener('click', (e) => { state.craftTab = 'furnace'; e.currentTarget.className = 'px-2.5 py-1 rounded-lg bg-amber-400 text-slate-950 font-bold'; document.getElementById('craft-tab-table').className = 'px-2.5 py-1 rounded-lg text-slate-300 hover:text-white font-semibold'; renderCrafting(); });
+    document.getElementById('btn-sound').addEventListener('click', (e) => { SFX.muted = !SFX.muted; e.currentTarget.textContent = SFX.muted ? '🔇' : '🔊'; });
+    document.getElementById('btn-weather').addEventListener('click', () => { state.raining = !state.raining; document.getElementById('weather-icon').textContent = state.raining ? '🌧️' : '🌤️'; rainDrops.forEach(r => r.visible = state.raining); });
+    document.getElementById('btn-time').addEventListener('click', () => { if (state.timeOfDay < 0.4) state.timeOfDay = 0.5; else if (state.timeOfDay < 0.65) state.timeOfDay = 0.78; else state.timeOfDay = 0.22; updateSky(); });
+
+    // =========================================================
+    // 10. INPUT HANDLERS
+    // =========================================================
+    document.addEventListener('pointerlockchange', () => { state.pointerLocked = document.pointerLockElement === canvas; document.getElementById('crosshair').classList.toggle('visible', state.pointerLocked); });
+    canvas.addEventListener('mousedown', (e) => {
+      SFX.init(); canvas.focus();
+      if (!document.getElementById('welcome-modal').classList.contains('hidden')) return;
+      if (state.pointerLocked) { if (e.button === 0) handlePrimaryAction(); else if (e.button === 2) handleSecondaryAction(); }
+      else { state.draggingLook = true; state.dragDistance = 0; state.lastMouse = { x: e.clientX, y: e.clientY }; if (e.button === 2) handleSecondaryAction(); }
+    });
+    window.addEventListener('mouseup', (e) => {
+      if (!state.pointerLocked && state.draggingLook && e.button === 0 && state.dragDistance < 6) {
+        if (state.clickMode === 'use') handleSecondaryAction(); else handlePrimaryAction();
+      }
+      state.draggingLook = false;
+    });
+    window.addEventListener('mousemove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      state.pointerNDC.x = ((e.clientX - rect.left) / rect.width) * 2 - 1; state.pointerNDC.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      if (state.pointerLocked) { player.yaw -= e.movementX * 0.0024; player.pitch = Math.max(-1.45, Math.min(1.45, player.pitch - e.movementY * 0.0024)); }
+      else if (state.draggingLook) {
+        const dx = e.clientX - state.lastMouse.x, dy = e.clientY - state.lastMouse.y; state.dragDistance += Math.hypot(dx, dy); state.lastMouse = { x: e.clientX, y: e.clientY };
+        player.yaw -= dx * 0.0055; player.pitch = Math.max(-1.45, Math.min(1.45, player.pitch - dy * 0.0055));
+      }
+    });
+    canvas.addEventListener('dblclick', () => { if (canvas.requestPointerLock && !state.pointerLocked) { try { canvas.requestPointerLock(); } catch (e) {} } });
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+    window.addEventListener('wheel', (e) => { state.selectedHotbar = (state.selectedHotbar + (e.deltaY > 0 ? 1 : -1) + 9) % 9; renderHotbar(); }, { passive: true });
+
+    window.addEventListener('keydown', (e) => {
+      if (document.activeElement && ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+      state.keys[e.code] = true;
+      if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+      if (e.code >= 'Digit1' && e.code <= 'Digit9') { state.selectedHotbar = parseInt(e.code.replace('Digit', ''), 10) - 1; renderHotbar(); }
+      if (e.code === 'KeyK') { const el = document.getElementById('cards-modal'); const open = !el.classList.contains('hidden'); if (!open) renderCardsModal(); toggleModal('cards-modal', !open); }
+      if (e.code === 'KeyG') { const el = document.getElementById('group-modal'); const open = !el.classList.contains('hidden'); if (!open) renderGroupModal(); toggleModal('group-modal', !open); }
+      if (e.code === 'KeyI') { const el = document.getElementById('inventory-modal'); const open = !el.classList.contains('hidden'); if (!open) renderInventory(); toggleModal('inventory-modal', !open); }
+      if (e.code === 'KeyC') { const el = document.getElementById('craft-modal'); const open = !el.classList.contains('hidden'); if (!open) renderCrafting(); toggleModal('craft-modal', !open); }
+      if (e.code === 'KeyM') { const el = document.getElementById('map-modal'); const open = !el.classList.contains('hidden'); if (!open) renderMapModal(); toggleModal('map-modal', !open); }
+      if (e.code === 'KeyV') stopSwiper();
+      if (e.code === 'KeyF') toggleFlyMode();
+      if (e.code === 'KeyE') handleSecondaryAction();
+      if (e.code === 'KeyQ') handlePrimaryAction();
+      if (e.code === 'Escape') ['cards-modal', 'group-modal', 'map-modal', 'inventory-modal', 'craft-modal'].forEach(id => toggleModal(id, false));
+    });
+    window.addEventListener('keyup', (e) => { state.keys[e.code] = false; });
+
+    let touchLookId = null, lastTouch = { x: 0, y: 0 };
+    canvas.addEventListener('touchstart', (e) => { SFX.init(); const t = e.changedTouches[0]; touchLookId = t.identifier; lastTouch = { x: t.clientX, y: t.clientY }; }, { passive: true });
+    canvas.addEventListener('touchmove', (e) => {
+      for (const t of e.changedTouches) if (t.identifier === touchLookId) {
+        const dx = t.clientX - lastTouch.x, dy = t.clientY - lastTouch.y; lastTouch = { x: t.clientX, y: t.clientY };
+        player.yaw -= dx * 0.006; player.pitch = Math.max(-1.45, Math.min(1.45, player.pitch - dy * 0.006));
+      }
+    }, { passive: true });
+    document.querySelectorAll('.touch-move').forEach(btn => {
+      const dir = btn.dataset.move;
+      const setDir = (val) => {
+        if (dir === 'jump' && val) { if (state.flyMode) player.pos.y += 1.0; else if (player.onGround) { player.vel.y = 7.2; player.onGround = false; } }
+        else if (dir !== 'jump') state.touchMove[dir] = val;
+      };
+      btn.addEventListener('touchstart', (e) => { e.preventDefault(); setDir(true); }); btn.addEventListener('touchend', (e) => { e.preventDefault(); setDir(false); });
+      btn.addEventListener('mousedown', () => setDir(true)); btn.addEventListener('mouseup', () => setDir(false)); btn.addEventListener('mouseleave', () => setDir(false));
+    });
+    const bindHold = (id, key) => {
+      const el = document.getElementById(id);
+      el.addEventListener('touchstart', (e) => { e.preventDefault(); state.turnButtons[key] = true; }); el.addEventListener('touchend', (e) => { e.preventDefault(); state.turnButtons[key] = false; });
+      el.addEventListener('mousedown', () => { state.turnButtons[key] = true; }); el.addEventListener('mouseup', () => { state.turnButtons[key] = false; }); el.addEventListener('mouseleave', () => { state.turnButtons[key] = false; });
+    };
+    bindHold('pad-turn-left', 'left'); bindHold('pad-turn-right', 'right');
+    document.getElementById('touch-use').addEventListener('click', handleSecondaryAction);
+    document.getElementById('touch-break').addEventListener('click', handlePrimaryAction);
+
+    // =========================================================
+    // 11. SKY, PHYSICS & MAIN LOOP
+    // =========================================================
+    function updateSky() {
+      const t = state.timeOfDay, label = document.getElementById('stat-time');
+      let skyHex = 0x87ceeb, sunInt = 0.95, hemiInt = 0.78;
+      if (t >= 0.45 && t < 0.65) { skyHex = 0xfb923c; sunInt = 0.75; hemiInt = 0.55; label.textContent = '🌅 Sunset'; }
+      else if (t >= 0.65) { skyHex = 0x0f172a; sunInt = 0.22; hemiInt = 0.28; label.textContent = '🌙 Night'; }
+      else label.textContent = '☀️ Day';
+      if (state.raining && t < 0.65) skyHex = 0x64748b;
+      scene.background.setHex(skyHex); scene.fog.color.setHex(skyHex);
+      sunLight.intensity = sunInt; hemiLight.intensity = hemiInt;
+    }
+
+    function isSolidAt(x, y, z) { const b = voxelMap.get(keyOf(Math.floor(x), Math.floor(y), Math.floor(z))); return b && b.type !== 'water' && b.type !== 'torch'; }
+    function tryMoveAxis(dx, dz) {
+      const nx = player.pos.x + dx, nz = player.pos.z + dz;
+      if (nx <= 0.4 || nx >= WORLD_SIZE - 0.4 || nz <= 0.4 || nz >= WORLD_SIZE - 0.4) return;
+      if (state.flyMode) { player.pos.x = nx; player.pos.z = nz; return; }
+      const feetY = player.pos.y - player.height, blockedLow = isSolidAt(nx, feetY + 0.25, nz), blockedHigh = isSolidAt(nx, feetY + 1.25, nz);
+      if (!blockedLow && !blockedHigh) { player.pos.x = nx; player.pos.z = nz; }
+      else if (blockedLow && !blockedHigh && !isSolidAt(nx, feetY + 2.1, nz)) { player.pos.x = nx; player.pos.z = nz; player.pos.y += 1.02; }
+    }
+
+    function updatePhysics(dt) {
+      if (state.turnButtons.left) player.yaw += 2.2 * dt;
+      if (state.turnButtons.right) player.yaw -= 2.2 * dt;
+      const forward = new THREE.Vector3(-Math.sin(player.yaw), 0, -Math.cos(player.yaw)), right = new THREE.Vector3(Math.cos(player.yaw), 0, -Math.sin(player.yaw)), move = new THREE.Vector3();
+      if (state.keys['KeyW'] || state.keys['ArrowUp'] || state.touchMove.forward) move.add(forward);
+      if (state.keys['KeyS'] || state.keys['ArrowDown'] || state.touchMove.backward) move.sub(forward);
+      if (state.keys['KeyD'] || state.keys['ArrowRight'] || state.touchMove.right) move.add(right);
+      if (state.keys['KeyA'] || state.keys['ArrowLeft'] || state.touchMove.left) move.sub(right);
+      const sprinting = !state.flyMode && (state.keys['ShiftLeft'] || state.keys['ShiftRight']) && state.hunger > 4;
+      if (move.lengthSq() > 0) {
+        const spd = state.flyMode ? player.speed * 1.4 : sprinting ? player.speed * 1.45 : player.speed;
+        move.normalize().multiplyScalar(spd * dt); tryMoveAxis(move.x, 0); tryMoveAxis(0, move.z);
+        if (!state.creative && sprinting) state.hunger = Math.max(0, state.hunger - 0.35 * dt);
+      }
+      if (state.flyMode) {
+        if (state.keys['Space']) player.pos.y += 6.5 * dt;
+        if (state.keys['ShiftLeft'] || state.keys['ShiftRight']) player.pos.y = Math.max(3, player.pos.y - 6.5 * dt);
+        player.peakY = player.pos.y;
+      } else {
+        if (state.keys['Space'] && player.onGround) { player.vel.y = 7.2; player.onGround = false; }
+        player.vel.y -= 18.5 * dt;
+        const nextY = player.pos.y + player.vel.y * dt, feetY = nextY - player.height;
+        if (player.pos.y > player.peakY) player.peakY = player.pos.y;
+        if (player.vel.y <= 0 && isSolidAt(player.pos.x, feetY, player.pos.z)) {
+          const fallDist = player.peakY - nextY;
+          if (!state.creative && fallDist > 4.2) { const dmg = Math.floor(fallDist - 3.5); state.hp = Math.max(0, state.hp - dmg); SFX.hit(); showToast(`Fall damage! -${dmg} HP`); updateStats(); }
+          player.pos.y = Math.floor(feetY) + 1 + player.height; player.vel.y = 0; player.onGround = true; player.peakY = player.pos.y;
+        } else if (nextY < 2) { player.pos.y = 6; player.vel.y = 0; player.peakY = 6; }
+        else { player.pos.y = nextY; player.onGround = false; }
+      }
+      if (!state.creative && state.hp <= 0) { state.hp = 20; state.hunger = 20; player.pos.set(14, getSurfaceY(14, 18) + 2.5, 18); showToast('Respawned at Meadow Spawn!'); updateStats(); }
+      camera.position.copy(player.pos); camera.rotation.order = 'YXZ'; camera.rotation.y = player.yaw; camera.rotation.x = player.pitch;
+    }
+
+    function updateInspector() {
+      const target = getTargetHit(), pill = document.getElementById('target-pill');
+      if (!target) { highlightMesh.visible = false; pill.classList.add('hidden'); return; }
+      const { data } = target; highlightMesh.visible = true;
+      if (data.kind === 'swiper') { document.getElementById('target-icon').textContent = '🦊'; document.getElementById('target-name').textContent = 'Swiper the Fox'; document.getElementById('target-extra').textContent = '• Click or press V!'; highlightMesh.visible = false; }
+      else if (data.kind === 'mob') { document.getElementById('target-icon').textContent = '🟢'; document.getElementById('target-name').textContent = 'Garden Slime'; const m = mobs.find(x => x.id === data.mobId); document.getElementById('target-extra').textContent = m ? `• ${m.hp} HP` : ''; highlightMesh.visible = false; }
+      else if (data.kind === 'block') { highlightMesh.position.set(data.x + 0.5, data.y + 0.5, data.z + 0.5); highlightMesh.scale.set(1, 1, 1); const b = BLOCKS[data.type]; document.getElementById('target-icon').textContent = b.icon; document.getElementById('target-name').textContent = b.name; document.getElementById('target-extra').textContent = ''; }
+      else { highlightMesh.position.set(data.x + 0.5, data.y + 0.35, data.z + 0.5); highlightMesh.scale.set(0.55, 0.7, 0.55); const entry = flowerMap.get(keyOf(data.x, data.y, data.z)), def = FLOWERS.find(f => f.id === data.flowerId); document.getElementById('target-icon').textContent = def.icon; document.getElementById('target-name').textContent = def.name; document.getElementById('target-extra').textContent = entry ? `• ${['Seedling','Budding','Full Bloom!'][entry.stage]}` : ''; }
+      pill.classList.remove('hidden');
+    }
+
+    function resizeRenderer() { const w = container.clientWidth || window.innerWidth, h = container.clientHeight || window.innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+    window.addEventListener('resize', resizeRenderer);
+
+    let lastTime = performance.now(), statTick = 0, swiperCooldown = 25;
+    function animate(now) {
+      requestAnimationFrame(animate);
+      const dt = Math.min(0.05, (now - lastTime) / 1000); lastTime = now;
+      updatePhysics(dt); updateInspector();
+
+      statTick += dt;
+      if (statTick > 1.0) { statTick = 0; if (!state.creative && state.hunger > 14 && state.hp < 20) state.hp = Math.min(20, state.hp + 0.5); updateStats(); }
+
+      if (boots) {
+        const targetPos = new THREE.Vector3(player.pos.x - 2.2, player.pos.y, player.pos.z - 2.2);
+        const dir = new THREE.Vector3().subVectors(targetPos, boots.group.position); dir.y = 0;
+        if (dir.length() > 1.5) { dir.normalize().multiplyScalar(3.5 * dt); boots.group.position.x += dir.x; boots.group.position.z += dir.z; }
+        const bsy = getSurfaceY(Math.floor(boots.group.position.x), Math.floor(boots.group.position.z));
+        if (bsy >= 0) boots.group.position.y = bsy + 1.0 + Math.abs(Math.sin(now * 0.006)) * 0.25;
+        boots.giftTimer -= dt;
+        if (boots.giftTimer <= 0) { boots.giftTimer = 28; addItem('apple', 1); showToast('🐒 Boots found a 🍎 Meadow Apple!'); }
+      }
+
+      swiperCooldown -= dt;
+      if (swiperCooldown <= 0 && !swiper) { swiperCooldown = 38; spawnSwiper(); }
+      if (swiper) {
+        const dir = new THREE.Vector3(swiper.tx - swiper.group.position.x, 0, swiper.tz - swiper.group.position.z);
+        if (dir.length() > 0.6) {
+          dir.normalize().multiplyScalar(2.4 * dt); swiper.group.position.x += dir.x; swiper.group.position.z += dir.z;
+          const ssy = getSurfaceY(Math.floor(swiper.group.position.x), Math.floor(swiper.group.position.z));
+          if (ssy >= 0) swiper.group.position.y = ssy + 1.0 + Math.abs(Math.sin(now * 0.008)) * 0.2;
+        } else {
+          const f = flowerMap.get(swiper.targetKey); if (f) { removeFlower(f.x, f.y, f.z); showToast('🦊 Oh no! Swiper swiped a bloom!'); }
+          mobGroup.remove(swiper.group); swiper = null; document.getElementById('swiper-banner').classList.add('hidden');
+        }
+      }
+
+      if (state.timeOfDay >= 0.65 && Math.random() < 0.008) spawnSlime();
+      if (player.invulnTimer > 0) player.invulnTimer -= dt;
+      mobs.forEach(m => {
+        const dir = new THREE.Vector3().subVectors(player.pos, m.mesh.position); dir.y = 0; const dist = dir.length();
+        if (dist > 0.8 && dist < 14) {
+          dir.normalize().multiplyScalar(1.8 * dt); m.mesh.position.x += dir.x; m.mesh.position.z += dir.z;
+          const sy = getSurfaceY(Math.floor(m.mesh.position.x), Math.floor(m.mesh.position.z));
+          if (sy >= 0) m.mesh.position.y = sy + 1.38 + Math.abs(Math.sin(now * 0.005 + m.hopTimer)) * 0.35;
+        }
+        if (dist < 1.35 && !state.creative && player.invulnTimer <= 0) { state.hp = Math.max(0, state.hp - 2); player.invulnTimer = 1.0; SFX.hit(); updateStats(); }
+      });
+
+      const tSec = now * 0.001;
+      flowerMap.forEach(entry => {
+        entry.mesh.rotation.z = Math.sin(tSec * 1.8 + entry.swayOffset) * 0.05;
+        if (entry.id === 'prism' && entry.stage === 2) { const hue = (tSec * 0.15) % 1; entry.mesh.children.forEach((c, i) => { if (i > 3 && c.material) c.material.color.setHSL(hue, 0.85, 0.68); }); }
+        if (entry.stage < 2) {
+          const below = voxelMap.get(keyOf(entry.x, entry.y - 1, entry.z));
+          const mult = (below?.hydrated ? 2.5 : 1) * (state.raining ? 1.8 : 1) * (entry.watered ? 1.6 : 1);
+          entry.growth += 0.03 * mult * dt;
+          if (entry.growth >= 1) upgradeFlowerStage(entry, 2); else if (entry.growth >= 0.45 && entry.stage < 1) upgradeFlowerStage(entry, 1);
+        }
+      });
+
+      butterflies.forEach(b => {
+        b.angle += b.speed * dt;
+        b.group.position.x = b.center.x + Math.cos(b.angle) * 3.2; b.group.position.z = b.center.z + Math.sin(b.angle * 1.3) * 3.2;
+        b.group.position.y = b.center.y + Math.sin(tSec * 2.5 + b.angle) * 0.4; b.group.rotation.y = -b.angle;
+        const flap = Math.sin(tSec * 16 + b.angle) * 0.65; b.w1.rotation.z = flap; b.w2.rotation.z = -flap;
+      });
+      if (state.raining) rainDrops.forEach(r => { r.position.y -= 14 * dt; if (r.position.y < 1) r.position.y = 16; });
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i]; p.life -= dt; p.vel.y -= 7 * dt; p.mesh.position.addScaledVector(p.vel, dt);
+        p.mesh.scale.setScalar(Math.max(0.01, p.life)); if (p.life <= 0) { fxGroup.remove(p.mesh); particles.splice(i, 1); }
+      }
+      renderer.render(scene, camera);
+    }
+
+    window.onload = () => {
+      resizeRenderer();
+      if (!loadLocal()) generateMeadow();
+      spawnButterflies(); spawnBoots(); updateSky(); renderHotbar(); updateStats();
+      lastTime = performance.now(); requestAnimationFrame(animate);
+    };
+  })();
+  </script>
+</body>
+</html>
