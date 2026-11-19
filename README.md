@@ -111,5 +111,3 @@ Open the live GitHub Pages link for this repository (`https://<your-username>.gi
 2. Open `index.html` directly in Chrome, Edge, Firefox, or Safari—or start a quick local server:
    ```bash
    python3 -m http.server 8000
-
-[./preview.jpg]
