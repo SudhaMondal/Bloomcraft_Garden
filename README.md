@@ -104,7 +104,7 @@ I wanted to create a cozy, collaborative web game that anyone can play instantly
 ## ▶️ How to Run the Game
 
 ### Option 1: Play Live on GitHub Pages
-Open the live GitHub Pages link for this repository (`https://<your-username>.github.io/Bloomcraft_Garden/`) in any modern browser—no installation required!
+Open the live GitHub Pages link for this repository (`https://sudhamondal.github.io/Bloomcraft_Garden/`) in any modern browser—no installation required!
 
 ### Option 2: Run Locally
 1. Download or clone this repository.
